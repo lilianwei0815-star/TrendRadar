@@ -1,0 +1,66 @@
+name: 萌宠创作热点推送
+
+on:
+  schedule:
+    # GitHub cron uses UTC: Beijing time 08:00, 12:00, 18:00.
+    - cron: '0 0,4,10 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式：test 仅测试飞书；normal 抓取并推送；preview 抓取但不发送'
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - normal
+          - preview
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/hotspot-push.yml'
+      - 'scripts/hotspot_push.py'
+      - 'config/hotspot.json'
+      - 'config/frequency_words.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hotspot-push-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify configuration and keyword rules
+        run: python -m unittest discover -s tests/hotspot -v
+      - name: Fetch and send
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          RUN_MODE: ${{ inputs.mode }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ] || [ "$RUN_MODE" = "test" ]; then
+            python scripts/hotspot_push.py --mode test
+          elif [ "$RUN_MODE" = "preview" ]; then
+            python scripts/hotspot_push.py --dry-run --output output/hotspot-preview.json
+          else
+            python scripts/hotspot_push.py --output output/hotspot-report.json
+          fi
+      - name: Save report or preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotspot-report-${{ github.run_id }}
+          path: output/hotspot-*.json
+          if-no-files-found: ignore
+          retention-days: 7
