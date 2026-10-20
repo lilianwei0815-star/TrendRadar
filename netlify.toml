@@ -1,0 +1,17 @@
+[build]
+  base = "cloud/netlify"
+  command = "npm test"
+  publish = "public"
+  functions = "functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions.hotspot-schedule]
+  schedule = "0 0,4,10 * * *"
+
+[context.deploy-preview]
+  command = "npm test"

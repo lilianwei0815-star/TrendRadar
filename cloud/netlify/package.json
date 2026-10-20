@@ -1,0 +1,11 @@
+{
+  "name": "feishu-hotspot-free",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && node --test tests/*.test.mjs",
+    "preview": "node build.mjs && node preview.mjs"
+  }
+}
