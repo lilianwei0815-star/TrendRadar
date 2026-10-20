@@ -1,9 +1,7 @@
 name: 萌宠创作热点推送
 
 on:
-  schedule:
-    # GitHub cron uses UTC: Beijing time 08:00, 12:00, 18:00.
-    - cron: '0 0,4,10 * * *'
+  # Automatic pushes are served by Netlify; retain manual recovery only.
   workflow_dispatch:
     inputs:
       mode:
@@ -15,13 +13,6 @@ on:
           - test
           - normal
           - preview
-  push:
-    branches: [master]
-    paths:
-      - '.github/workflows/hotspot-push.yml'
-      - 'scripts/hotspot_push.py'
-      - 'config/hotspot.json'
-      - 'config/frequency_words.txt'
 
 permissions:
   contents: read
