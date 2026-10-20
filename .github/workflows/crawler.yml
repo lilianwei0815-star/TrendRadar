@@ -35,8 +35,9 @@ on:
     #   "15 * * * *"     → 每小时第15分钟 / minute 15 every hour
     #   "30 0-14 * * *"  → 北京时间 8:00-22:00 每小时第30分钟 / Beijing 8am-10pm
     #
-    - cron: "33 * * * *"
-
+    - cron: '0 0 * * *'   # 北京时间 早8:00 推送
+    - cron: '0 4 * * *'   # 北京时间 午12:00 推送
+    - cron: '0 10 * * *'  # 北京时间 晚18:00 推送
   workflow_dispatch:
 
 concurrency:
