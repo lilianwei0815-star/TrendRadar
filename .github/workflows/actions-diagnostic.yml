@@ -1,0 +1,22 @@
+name: Actions Startup Diagnostic
+
+on:
+  push:
+    branches:
+      - codex/actions-diagnostic-20261020
+    paths:
+      - .github/workflows/actions-diagnostic.yml
+
+permissions: {}
+
+jobs:
+  startup-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm runner startup
+        shell: bash
+        run: |
+          echo 'GitHub Actions runner started successfully.'
+          date -u
+          uname -srm
