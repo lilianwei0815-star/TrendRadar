@@ -325,59 +325,90 @@ async function summarize(item,fetcher,signal) {
     summary_origin:description ? origin : '摘要暂缺'};
 }
 
+// Escape source text so captions cannot inject links, formatting or @mentions.
+const cardEscape=value=>String(value ?? '').replace(/[&<>*_[\]()`~#!\\]/g,
+  char=>'&#'+char.codePointAt(0)+';');
+const cardFallbacks=new WeakMap();
+const cardThemes=['purple','indigo','blue','orange','green','violet','red','grey'];
+const cardMarkdown=(content,size='normal')=>({tag:'markdown',content,text_size:size});
+
 export function makePayloads(items,config,failed,total,mode,now=new Date()) {
-  const stamp=new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,year:'numeric',month:'2-digit',day:'2-digit',
-    hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
-  const content=mode==='test' ? [textRow('连接测试：飞书机器人接口已收到请求。此消息不代表新闻抓取或定时任务已验证。'),
-    textRow('计划：北京时间每天 08:00、18:00，标题＋原文链接＋中文摘要。')] :
-    [textRow(`本次筛选匹配 ${total} 条，展示 ${items.length} 条；同标题跨平台合并。`)];
-  if (mode!=='test') {
-    if (!items.length) content.push(textRow('本次暂无匹配内容。已按全部屏蔽词过滤。'));
-    // Only actual video-chart entries with a video URL and metrics can enter video sections.
-    const sections=config.presentation?.sections || [];
-    const grouped=new Map();
-    for (const item of items) {
-      const section=sections.find(section=>section.categories.includes(item.category)
-        && (!section.requires_video_evidence || (item.kind==='video' && item.video_evidence)));
-      const label=section?.name || '其他创作线索';
-      if (!grouped.has(label)) grouped.set(label,[]);
-      grouped.get(label).push(item);
-    }
-    let number=0;
-    const ordered=[...sections.map(section=>section.name),'其他创作线索'];
-    for (const label of [...new Set([...ordered,...grouped.keys()])]) {
-      const entries=grouped.get(label);
-      if (!entries?.length) continue;
-      content.push([{tag:'text',text:`━━ ${label}（${entries.length}条）━━`}]);
-      for (const item of entries) {
-        content.push(textRow(`${++number}. ${item.title}`),
-          [{tag:'a',text:item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文',href:item.url}],
-          textRow(`摘要：${item.summary}`));
-        if (item.kind==='video') content.push(textRow(`作者与热度：${item.metrics}`),
-          textRow(`视频时长：${item.duration ? Math.floor(item.duration/60)+'分'+Math.floor(item.duration%60)+'秒' : '来源未提供'}`),
-          textRow(`发布时间：${item.published_at ? new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.published_at)) : '来源未提供'}`),
-          textRow(`依据：${item.video_evidence}；AI类型按标题及简介归类。`));
-        if (item.metrics_checked_at) content.push(textRow(`互动数据查询时间：${new Intl.DateTimeFormat('sv-SE',
-          {timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.metrics_checked_at))}`));
-        else if (item.heat) content.push(textRow(`话题热度：${item.heat}（不是单条视频播放量）`));
-        content.push(textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`));
+  const date=value=>new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(value));
+  const stamp=date(now),sections=config.presentation?.sections || [],grouped=new Map();
+  if (mode==='test') {
+    return [0,1,3].map(index=> {
+      const label=sections[index]?.name || '热点话题';
+      const card={msg_type:'interactive',card:{schema:'2.0',config:{wide_screen_mode:true},
+        header:{template:cardThemes[index],title:{tag:'plain_text',content:'排版测试｜'+label}},
+        body:{elements:[cardMarkdown(stamp+' · 仅测试排版，不调用新闻或付费接口','notation'),
+          cardMarkdown('**示例作品标题：放大、加粗，更容易扫读**','heading-3'),
+          cardMarkdown('摘要：正式推送会在这里展示来源摘要，作品与话题按分类分别发送。'),
+          {tag:'hr'},cardMarkdown('辅助信息：作者 · 点赞 · 来源 · 时间','notation'),
+          cardMarkdown('连接测试：此消息不代表新闻抓取或定时任务已验证。计划：北京时间每天 08:00、18:00。','notation')]}}};
+      cardFallbacks.set(card,[card.card.header.title.content,...card.card.body.elements.filter(x=>x.content).map(x=>x.content)].join('\n'));
+      return card;
+    });
+  }
+  for (const item of items) {
+    const section=sections.find(section=>section.categories.includes(item.category)
+      && (!section.requires_video_evidence || (item.kind==='video' && item.video_evidence)));
+    const label=section?.name || '其他创作线索';
+    if (!grouped.has(label)) grouped.set(label,[]);
+    grouped.get(label).push(item);
+  }
+  const payloads=[]; let number=0;
+  const ordered=[...new Set([...sections.map(x=>x.name),'其他创作线索',...grouped.keys()])];
+  for (const label of ordered) {
+    const entries=grouped.get(label); if (!entries?.length) continue;
+    const theme=cardThemes[Math.max(0,sections.findIndex(x=>x.name===label))] || 'grey';
+    const blocks=entries.map(item=> {
+      const title=`${++number}. ${item.title}`;
+      const linkLabel=item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文';
+      const href=item.url.replace(/[<> ()\\]/g,c=>encodeURIComponent(c));
+      const elements=[cardMarkdown('**'+cardEscape(title)+'**','heading-3'),
+        cardMarkdown(`[${linkLabel}](${href})`),cardMarkdown('摘要：'+cardEscape(item.summary))];
+      const plain=[title,linkLabel+' '+item.url,'摘要：'+item.summary];
+      const extra=[];
+      if (item.kind==='video') {
+        elements.push(cardMarkdown(cardEscape('作者与热度：'+item.metrics)));
+        plain.push('作者与热度：'+item.metrics);
+        if (item.published_at) extra.push('发布：'+date(item.published_at));
+        if (item.duration) extra.push('时长：'+Math.floor(item.duration/60)+'分'+Math.floor(item.duration%60)+'秒');
       }
+      if (item.metrics_checked_at) extra.push('数据查询：'+date(item.metrics_checked_at));
+      else if (item.heat) extra.push('话题热度：'+item.heat+'（非视频播放量）');
+      const paid=item.source_provider==='dataxapi-douyin' || item.sources.includes('抖音爆款视频线索');
+      extra.push('来源：'+item.sources.join('、')+(paid?' · 付费API':'')+'｜'+item.summary_origin);
+      elements.push(cardMarkdown(extra.map(cardEscape).join('\n'),'notation'));
+      plain.push(...extra);
+      return {elements,plain};
+    });
+    const footer=['本轮共 '+items.length+' 条，本分类 '+entries.length+' 条；同标题跨平台合并。'];
+    if (entries.some(x=>x.kind==='video')) footer.push('平台上榜或搜索筛选；AI分类依据标题及简介。播放量、实时粉丝、增速与账号历史未全面核实。');
+    footer.push('仅覆盖已配置公开来源；摘要摘录来源，不代表平台全部内容。');
+    if (failed.length) footer.push('本轮抓取失败：'+failed.join('、'));
+    if (config.coverage?.pending?.length) footer.push('尚未接通：'+config.coverage.pending.map(x=>x.name).join('、'));
+    const build=(batch,part)=> {
+      const heading=`${label}｜${entries.length}条`;
+      const elements=[cardMarkdown(`萌宠创作热点 · ${stamp} · 分类第${part}张`,'notation')];
+      batch.forEach((block,index)=>{if(index) elements.push({tag:'hr'}); elements.push(...block.elements);});
+      elements.push({tag:'hr'},cardMarkdown(footer.map(cardEscape).join('\n'),'notation'));
+      const payload={msg_type:'interactive',card:{schema:'2.0',config:{wide_screen_mode:true},
+        header:{template:theme,title:{tag:'plain_text',content:heading}},body:{elements}}};
+      cardFallbacks.set(payload,[heading,stamp,...batch.flatMap(x=>x.plain),...footer].join('\n'));
+      return payload;
+    };
+    let batch=[],part=1;
+    for (const block of blocks) {
+      if (batch.length && (batch.length>=6 || Buffer.byteLength(JSON.stringify(build([...batch,block],part)))>17000)) {
+        payloads.push(build(batch,part++)); batch=[];
+      }
+      if (Buffer.byteLength(JSON.stringify(build([block],part)))>17000) throw safeError('单条热点内容超过卡片大小限制');
+      batch.push(block);
     }
-    if (failed.length) content.push(textRow('部分平台抓取失败：'+failed.join('、')));
-    if (config.coverage?.pending?.length) content.push(textRow('尚未接通：'+config.coverage.pending.map(x=>x.name).join('、')+'；不代表这些平台没有热点。'));
-    content.push(textRow('覆盖配置中的公开热榜，不包含平台全部视频或私有数据；摘要仅摘录来源。'));
+    if (batch.length) payloads.push(build(batch,part));
   }
-  const payload=(rows,part)=>({msg_type:'post',content:{post:{zh_cn:{title:`萌宠创作热点｜${stamp}｜第${part}条消息`,content:rows}}}});
-  const batches=[];
-  let rows=[];
-  for (const row of content) {
-    if (rows.length && Buffer.byteLength(JSON.stringify(payload([...rows,row],batches.length+1)),'utf8')>17000) {
-      batches.push(payload(rows,batches.length+1)); rows=[];
-    }
-    rows.push(row);
-  }
-  if (rows.length) batches.push(payload(rows,batches.length+1));
-  return batches;
+  return payloads;
 }
 
 export async function sendFeishu(payloads,webhook,fetcher,signal) {
@@ -396,11 +427,13 @@ export async function sendFeishu(payloads,webhook,fetcher,signal) {
         const code=data.code ?? data.StatusCode;
         // Only a definitive format rejection permits one alternate representation.
         // Never resend on network errors, ambiguous responses or other business errors.
-        if (code===19002 && attempt===0 && payload.msg_type==='post') {
-          const post=payload.content.post.zh_cn;
-          outgoing={msg_type:'text',content:{text:[post.title,...post.content.map(row=>row.map(node=>
-            node.tag==='a'?node.text+' '+node.href:node.text || '').join(''))].join('\n')}};
-          console.log('飞书明确拒绝富文本格式；改用保留标题、链接和摘要的文本格式发送本条');
+        if (code===19002 && attempt===0 && ['post','interactive'].includes(payload.msg_type)) {
+          const post=payload.content?.post?.zh_cn;
+          const alternative=payload.msg_type==='interactive'?cardFallbacks.get(payload):
+            [post.title,...post.content.map(row=>row.map(node=>node.tag==='a'?node.text+' '+node.href:node.text || '').join(''))].join('\n');
+          if (!alternative) throw Error();
+          outgoing={msg_type:'text',content:{text:alternative}};
+          console.log('飞书明确拒绝消息格式；改用保留标题、链接和摘要的文本格式发送本条');
           continue;
         }
         if (code!==0) { failure=`机器人业务码 ${Number.isSafeInteger(code)?code:'未知'}`; throw Error(); }

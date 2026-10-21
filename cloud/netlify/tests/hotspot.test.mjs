@@ -72,14 +72,14 @@ test('groups news into distinct sections without claiming hot-search titles are 
   const payloads=makePayloads([
     item('社会热点与舆情','热点事件：官方通报'),item('萌宠垂类','流浪猫被救助'),
     item('网络热梗','这个新梗是什么梗'),item('AI萌宠博主与爆款','AI萌宠短片爆款话题')],settings,[],4,'normal');
-  const rows=payloads.flatMap(p=>p.content.post.zh_cn.content);
-  const headings=rows.filter(row=>row[0]?.text?.startsWith('━━ ')).map(row=>row[0].text);
+  const rows=payloads.flatMap(p=>p.card.body.elements);
+  const headings=payloads.map(p=>p.card.header.title.content);
   assert.deepEqual(headings,[
-    '━━ 萌宠与猫狗热点（1条）━━','━━ 网络热梗（1条）━━',
-    '━━ 公共社会热点（1条）━━','━━ 其他创作线索（视频热度未核实）（1条）━━']);
+    '萌宠与猫狗热点｜1条','网络热梗｜1条',
+    '公共社会热点｜1条','其他创作线索（视频热度未核实）｜1条']);
   assert.equal(headings.some(x=>/AI萌宠短片爆款|AI短片爆款|短视频爆款/.test(x)),false);
   assert.equal(classify('这个新梗是什么梗',rules),'网络热梗');
-  assert.equal(rows.filter(row=>/^\d+\. /.test(row[0]?.text || '')).length,4);
+  assert.equal(rows.filter(row=>row.text_size==='heading-3').length,4);
 });
 test('successful collection with no useful matches sends no filler message',async()=> {
   let sends=0;
@@ -115,7 +115,7 @@ test('video sections require chart provenance, a video URL and actual metric tex
   assert.equal(items.length,2); assert.ok(items.every(x=>x.category==='AI萌宠热门视频' && x.kind==='video'));
   const payload=JSON.stringify(makePayloads(items,settings,[],2,'normal'));
   assert.match(payload,/AI萌宠视频｜热门作品/); assert.match(payload,/观看视频/);
-  assert.match(payload,/12w\+观看/); assert.match(payload,/时长、增速与账号历史未核实/);
+  assert.match(payload,/12w\+观看/); assert.match(payload,/增速与账号历史未全面核实/);
   assert.equal(normalizeItems([result([raw],{...platform,kind:'topic'})],rules)[0].video_evidence,null);
 });
 test('source priority affects selection within an interest category',()=> {
@@ -210,7 +210,7 @@ test('messages use Beijing time and every full request stays below 20KB',()=> {
   const items=Array.from({length:60},(_,i)=>({category:'萌宠',title:'猫咪'+i,url:'https://www.baidu.com/a',
     summary:'猫咪'.repeat(90),sources:['百度'],summary_origin:'原文摘要摘录'}));
   const payloads=makePayloads(items,settings,[],60,'normal',new Date('2026-10-20T00:00:00Z'));
-  assert.ok(payloads.length>1); assert.match(payloads[0].content.post.zh_cn.title,/2026-10-20 08:00/);
+  assert.ok(payloads.length>1); assert.match(payloads[0].card.body.elements[0].content,/2026-10-20 08:00/);
   for (const payload of payloads) assert.ok(Buffer.byteLength(JSON.stringify(payload))<20000);
 });
 test('connection-test message cannot be confused with a scheduled digest',()=> {
@@ -310,4 +310,40 @@ test('scheduler signs the exact event sent to its own background function',async
       if (value===undefined) delete process.env[key]; else process.env[key]=value;
     }
   }
+});
+
+
+test('category cards preserve whole entries, use distinct colors and escape untrusted Markdown',()=> {
+  const rows=Array.from({length:13},(_,i)=>({category:'萌宠垂类',title:'猫咪'+i+' <at id=all></at> **恶意**',
+    url:'https://www.baidu.com/a?x=1&y=2',summary:'来源文字 [伪链接](https://evil.test)',
+    sources:['百度'],summary_origin:'原文摘要摘录'}));
+  rows.push({...rows[0],category:'网络热梗',title:'网络新梗'});
+  const payloads=makePayloads(rows,settings,[],14,'normal');
+  assert.deepEqual(payloads.map(p=>p.card.body.elements.filter(e=>e.text_size==='heading-3').length),[6,6,1,1]);
+  assert.equal(payloads[0].card.header.template,'green');
+  assert.notEqual(payloads[0].card.header.template,payloads[3].card.header.template);
+  const body=JSON.stringify(payloads);
+  assert.equal(body.includes('<at id=all>'),false);
+  assert.match(body,/&#60;at/); assert.match(body,/&#91;伪链接&#93;/);
+  assert.equal(payloads.flatMap(p=>p.card.body.elements).filter(e=>e.content?.includes('[查看原文]')).length,14);
+  for (const p of payloads) assert.ok(Buffer.byteLength(JSON.stringify(p))<20000);
+});
+test('interactive rejection preserves original captions and URLs in a single text fallback',async()=> {
+  const payload=makePayloads([{category:'萌宠垂类',title:'猫咪 <故事>',url:'https://www.baidu.com/a',
+    summary:'猫咪故事摘要',sources:['百度'],summary_origin:'原文摘要摘录'}],settings,[],1,'normal')[0];
+  const sent=[];
+  assert.equal(await sendFeishu([payload],webhook,async(url,options)=>{
+    sent.push(JSON.parse(options.body));return json({code:sent.length===1?19002:0});
+  },AbortSignal.timeout(1000)),1);
+  assert.equal(sent[0].msg_type,'interactive');assert.equal(sent[1].msg_type,'text');
+  assert.match(sent[1].content.text,/猫咪 <故事>/);assert.match(sent[1].content.text,/https:\/\/www.baidu.com\/a/);
+});
+test('layout test sends three colored cards without requesting any data source',async()=> {
+  const sent=[];
+  const report=await runDigest({mode:'test',webhook,fetcher:async(url,options)=>{
+    assert.equal(String(url),webhook);sent.push(JSON.parse(options.body));return json({code:0});
+  }});
+  assert.equal(report.delivered,3);assert.equal(report.selected,0);
+  assert.equal(new Set(sent.map(p=>p.card.header.template)).size,3);
+  assert.ok(sent.every(p=>p.card.header.title.content.startsWith('排版测试')));
 });

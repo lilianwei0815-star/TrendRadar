@@ -58,7 +58,7 @@ test('DataX rechecks detail likes, never combines chart views/fans with current 
   const items=normalizeItems([result],loadRules());
   assert.equal(items[0].kind,'video'); assert.ok(items[0].video_evidence);
   const payload=JSON.stringify(makePayloads(items.map(x=>({...x,summary:'原文',summary_origin:'视频文案摘录'})),settings,[],1,'normal'));
-  assert.match(payload,/互动数据查询时间/);
+  assert.match(payload,/数据查询：/);
 });
 
 test('DataX preserves category diversity, applies thresholds, and has a hard nine-request/$0.054 ceiling',async()=>{
