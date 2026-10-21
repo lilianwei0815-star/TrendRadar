@@ -1,5 +1,6 @@
 [build]
   base = "cloud/netlify"
+  ignore = 'git diff --quiet "$CACHED_COMMIT_REF" "$COMMIT_REF" -- . ../../config ../../netlify.toml || exit 1'
   command = "npm test && node probe.mjs"
   publish = "public"
   functions = "functions"
