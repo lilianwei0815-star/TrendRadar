@@ -47,20 +47,24 @@ export async function collectDataxDouyin(source,fetcher,signal,
   // One page per query, no pagination/retries. Hard ceilings survive config mistakes.
   const maxDetails=Math.min(6,Math.max(0,Math.floor(cfg.max_detail_requests ?? 6)));
   let spent=0,calls=0,stopped=false,failures=0;
+  const failureKinds=[];
   const get=async(kind,params)=> {
     const units=kind==='search'?20:2; // units of $0.001; at most $0.054 per digest
     if (stopped || signal.aborted || calls>=9 || spent+units>54) return null;
     calls++; spent+=units;
     const url=new URL(paths[kind],ORIGIN);
     for (const [name,value] of Object.entries({...params,view:'full'})) url.searchParams.set(name,value);
+    let failureKind='network_or_timeout';
     try {
       const response=await fetcher(url,{headers:{Authorization:'Bearer '+key,Accept:'application/json',
         'X-Max-Price':(units/1000).toFixed(3)},redirect:'error',
         signal:AbortSignal.any([signal,AbortSignal.timeout(12000)])});
       if (!response.ok) {
+        failureKind='http_'+response.status;
         if ([401,402,403,429].includes(response.status)) stopped=true;
         await response.body?.cancel(); throw Error();
       }
+      failureKind='invalid_response';
       if (!response.body) throw Error();
       const reader=response.body.getReader(),chunks=[]; let size=0;
       try {
@@ -72,7 +76,7 @@ export async function collectDataxDouyin(source,fetcher,signal,
       const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (data.code!=='ok') { stopped=true; throw Error(); }
       return data;
-    } catch { failures++; return null; } // Never log provider bodies, headers, URLs or secrets.
+    } catch { failures++; failureKinds.push(failureKind); return null; } // Never log provider bodies, headers, URLs or secrets.
   };
   const options={now,maxAgeDays:Math.min(7,Math.max(1,cfg.max_age_days))};
   const pools=[new Map(),new Map(),new Map()];
@@ -107,5 +111,6 @@ export async function collectDataxDouyin(source,fetcher,signal,
       extra:{info:metrics.join(' · '),hover:item.description}});
   }
   return {source,items,error:failures && !items.length?'抖音视频接口未能取得可核实作品；请检查额度及服务状态':null,
-    diagnostics:{requests:calls,max_request_cost_usd:spent/1000,failed_requests:failures,verified:items.length}};
+    diagnostics:{requests:calls,max_request_cost_usd:spent/1000,failed_requests:failures,
+      failure_kinds:failureKinds,verified:items.length}};
 }

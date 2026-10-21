@@ -86,6 +86,7 @@ test('DataX errors stop credentials/paid calls without retries or leaking respon
   const failed=await collectDataxDouyin(source,async()=>{calls++;return new Response('test-only-not-a-real-key',{status:402});},
     AbortSignal.timeout(1000),{secrets,now});
   assert.equal(calls,1); assert.ok(failed.error);
+  assert.deepEqual(failed.diagnostics.failure_kinds,['http_402']);
   assert.equal(JSON.stringify(failed).includes('test-only-not-a-real-key'),false);
   assert.equal(failed.items.length,0);
 });

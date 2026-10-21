@@ -385,16 +385,17 @@ export async function sendFeishu(payloads,webhook,fetcher,signal) {
       !new URL(webhook).pathname.startsWith('/open-apis/bot/v2/hook/')) throw safeError('FEISHU_WEBHOOK_URL 格式不正确');
   let delivered=0;
   for (const payload of payloads) {
+    let failure='网络或超时';
     try {
       const response=await fetcher(webhook,{method:'POST',redirect:'error',signal:requestSignal(signal,20000),
         headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if (!response.ok) { await response.body?.cancel(); throw Error(); }
+      if (!response.ok) { failure=`HTTP ${response.status}`; await response.body?.cancel(); throw Error(); }
       const data=JSON.parse(await readLimited(response,100000));
       const code=data.code ?? data.StatusCode;
-      if (code!==0) throw Error();
+      if (code!==0) { failure=`机器人业务码 ${Number.isSafeInteger(code)?code:'未知'}`; throw Error(); }
       delivered++;
       console.log(`飞书已确认接收第 ${delivered}/${payloads.length} 条消息`);
-    } catch { throw safeError(`飞书发送失败（此前已确认 ${delivered} 条）；未自动重发，请检查机器人及运行记录`); }
+    } catch { throw safeError(`飞书发送失败（此前已确认 ${delivered} 条；${failure}）；未自动重发，请检查机器人及运行记录`); }
     if (delivered<payloads.length) await new Promise(resolve=>setTimeout(resolve,1000));
   }
   return delivered;
@@ -416,7 +417,8 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
         .filter(x=>x.name!=='抖音具体热门视频')}};
     }
     failed=sourceResults.filter(x=>x.error).map(x=>x.source.name);
-    for (const result of sourceResults) console.log(`${result.source.name}：${result.error || `获取 ${result.items.length} 条`}`);
+    for (const result of sourceResults) console.log(`${result.source.name}：${result.error || `获取 ${result.items.length} 条`}`
+      +(result.diagnostics?'；'+JSON.stringify(result.diagnostics):''));
     if (failed.length===config.sources.length) throw safeError('所有平台均抓取失败，停止发送，避免误报暂无新闻');
     const candidates=normalizeItems(sourceResults,rules);
     total=candidates.length;
