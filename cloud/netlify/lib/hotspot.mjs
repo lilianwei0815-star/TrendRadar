@@ -173,7 +173,7 @@ async function fetchSource(source,config,fetcher,signal,{secrets=process.env,all
 
 export async function collectSources(config,fetcher=fetch,signal=AbortSignal.timeout(90000),options={}) {
   const sourceSignal=AbortSignal.any([signal,AbortSignal.timeout(90000)]);
-  return mapLimit([...config.sources].sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)),3,
+  return mapLimit(config.sources.filter(source=>source.enabled!==false).sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)),3,
     source=>fetchSource(source,config,fetcher,sourceSignal,options));
 }
 
@@ -455,8 +455,8 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
   if (mode!=='test') {
     const rules=loadRules();
     // Disabled credential integrations are absent from normal digests until explicitly enabled.
-    config={...config,sources:config.sources.filter(source=>source.provider!=='dataxapi-douyin'
-      || secrets.DATAXAPI_DOUYIN_ENABLED==='true')};
+    config={...config,sources:config.sources.filter(source=>source.enabled!==false && (source.provider!=='dataxapi-douyin'
+      || secrets.DATAXAPI_DOUYIN_ENABLED==='true'))};
     sourceResults=await collectSources(config,fetcher,signal,{secrets});
     if (sourceResults.some(x=>x.source.provider==='dataxapi-douyin' && !x.error)) {
       config={...config,coverage:{...config.coverage,pending:(config.coverage?.pending || [])

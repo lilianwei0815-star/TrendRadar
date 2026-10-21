@@ -347,3 +347,19 @@ test('layout test sends three colored cards without requesting any data source',
   assert.equal(new Set(sent.map(p=>p.card.header.template)).size,3);
   assert.ok(sent.every(p=>p.card.header.title.content.startsWith('排版测试')));
 });
+
+
+test('disabled paid source is never requested even with enabled production credentials',async()=> {
+  const paid={...settings.sources.find(x=>x.provider==='dataxapi-douyin'),enabled:false};
+  const config={...settings,sources:[paid,source]};
+  const fetcher=async url=> {
+    assert.equal(new URL(url).hostname,'newsnow.busiyi.world');
+    return json({status:'success',items:[]});
+  };
+  const options={secrets:{DATAXAPI_DOUYIN_ENABLED:'true',DATAXAPI_API_KEY:'test-only-key'}};
+  const results=await collectSources(config,fetcher,AbortSignal.timeout(1000),options);
+  assert.equal(results.length,1);assert.equal(results[0].source.id,'baidu');
+  const report=await runDigest({mode:'normal',webhook,config,fetcher,...options});
+  assert.equal(report.successful_sources,1);assert.equal(report.messages,0);
+  assert.equal(report.source_diagnostics.some(x=>x.id===paid.id),false);
+});

@@ -23,7 +23,8 @@
         "low_fan_min_likes": 5000,
         "low_fan_like_ratio": 2,
         "max_detail_requests": 6
-      }
+      },
+      "enabled": false
     },
     {
       "id": "bilibili-hot-video",
@@ -201,7 +202,7 @@
   },
   "video_discovery": {
     "platform": "douyin",
-    "status": "dataxapi_tested_integration_pending_runtime_activation",
+    "status": "paused_by_user_free_sources_only",
     "discovery_scope": "low_fan_chart_and_ai_keyword_search_detail_verified_when_enabled",
     "fixed_item_quota": false,
     "watchlist_enabled": false,
@@ -227,8 +228,8 @@
     ],
     "pending": [
       {
-        "name": "抖音具体热门视频",
-        "reason": "DataXAPI试用调用已通过；接入代码待运行时密钥和开关配置，定时推送尚未验收"
+        "name": "抖音付费视频接口（已暂停）",
+        "reason": "用户选择只使用免费来源；保留接口配置，恢复前检查余额并重新启用。"
       }
     ],
     "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。",
