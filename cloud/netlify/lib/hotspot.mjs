@@ -316,7 +316,7 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
   const stamp=new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,year:'numeric',month:'2-digit',day:'2-digit',
     hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
   const content=mode==='test' ? [textRow('连接测试：飞书机器人接口已收到请求。此消息不代表新闻抓取或定时任务已验证。'),
-    textRow('计划：北京时间每天 08:00、12:00、18:00，标题＋原文链接＋中文摘要。')] :
+    textRow('计划：北京时间每天 08:00、18:00，标题＋原文链接＋中文摘要。')] :
     [textRow(`本次筛选匹配 ${total} 条，展示 ${items.length} 条；同标题跨平台合并。`)];
   if (mode!=='test') {
     if (!items.length) content.push(textRow('本次暂无匹配内容。已按全部屏蔽词过滤。'));

@@ -2,7 +2,6 @@
   "timezone": "Asia/Shanghai",
   "push_times": [
     "08:00",
-    "12:00",
     "18:00"
   ],
   "api_url": "https://newsnow.busiyi.world/api/s",

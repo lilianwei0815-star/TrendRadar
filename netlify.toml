@@ -12,7 +12,7 @@
   node_bundler = "esbuild"
 
 [functions.hotspot-schedule]
-  schedule = "0 0,4,10 * * *"
+  schedule = "0 0,10 * * *"
 
 [context.deploy-preview]
   command = "npm test"

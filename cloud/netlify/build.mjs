@@ -11,4 +11,4 @@ await writeFile(new URL('public/deployment.json', import.meta.url), JSON.stringi
   digest_format: 'sectioned-v2',
   video_discovery: config.video_discovery?.status || 'not_configured'
 })+'\n');
-console.log(`已载入 ${config.sources.length} 个热榜/作品来源；北京时间每天 08:00、12:00、18:00`);
+console.log(`已载入 ${config.sources.length} 个热榜/作品来源；北京时间每天 08:00、18:00`);

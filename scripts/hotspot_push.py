@@ -220,7 +220,7 @@ def make_payloads(items: list[dict], config: dict, failed: list[str], total: int
     stamp = datetime.now(ZoneInfo(config["timezone"])).strftime("%Y-%m-%d %H:%M")
     if mode == "test":
         content = [text_row("连接测试：飞书机器人接口已收到请求。此消息不代表新闻抓取或定时任务已验证。"),
-                   text_row("计划：北京时间每天 08:00、12:00、18:00，标题＋原文链接＋中文摘要。")]
+                   text_row("计划：北京时间每天 08:00、18:00，标题＋原文链接＋中文摘要。")]
     else:
         content = [text_row(f"本次筛选匹配 {total} 条，展示 {len(items)} 条；同标题跨平台合并。")]
         if not items:
