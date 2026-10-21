@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {settings} from '../.generated/settings.mjs';
 import {loadRules,classify,allowedUrl,normalizeItems,selectItems,metadataDescriptions,usefulDescription,
-  makePayloads,sendFeishu,runDigest,mapLimit,collectSources} from '../lib/hotspot.mjs';
+  makePayloads,sendFeishu,runDigest,mapLimit,collectSources,parseNativeSource} from '../lib/hotspot.mjs';
 import {signature,authenticate} from '../lib/auth.mjs';
 
 const rules=loadRules();
@@ -99,6 +99,26 @@ test('unresponsive article pages exhaust only the summary budget and do not canc
     });
   }});
   assert.equal(report.summaries,0); assert.equal(report.delivered,1); assert.equal(sent,1);
+});
+test('native Bilibili adapter preserves exact public stats and prefers short works',()=> {
+  const raw={bvid:'BVtest001',title:'AI猫咪的故事',pubdate:1792530000,duration:180,desc:'AI猫咪帮助邻居的温暖故事。',
+    owner:{name:'作者甲'},stat:{view:123456,like:7890}};
+  const parsed=parseNativeSource('bilibili-popular',JSON.stringify({code:0,data:{list:[raw]}}));
+  assert.match(parsed[0].extra.info,/123456观看/); assert.equal(parsed[0].duration,180);
+  const items=normalizeItems([result(parsed,{name:'B站',expected_domain:'bilibili.com',kind:'video_chart',priority:1})],rules);
+  const selected=selectItems([{...items[0],title:'长视频',duration:1800,rank:1},
+    {...items[0],title:'短视频',duration:180,rank:20}],rules,1);
+  assert.equal(selected[0].title,'短视频');
+  assert.throws(()=>parseNativeSource('bilibili-popular',JSON.stringify({code:-412})),/未返回有效榜单/);
+});
+test('Kuaishou adapter only parses public JSON and filters pinned items',()=> {
+  const client={ROOT_QUERY:{'visionHotRank({"page":"home"})':{id:'rank'}},rank:{items:[{id:'a'},{id:'b'}]},
+    a:{name:'猫咪救助',tagType:'热'},b:{name:'置顶条目',tagType:'置顶'}};
+  const html='<html><script>window.__APOLLO_STATE__ = '+JSON.stringify({defaultClient:client})+';</script></html>';
+  const parsed=parseNativeSource('kuaishou-topics',html);
+  assert.equal(parsed.length,1); assert.equal(parsed[0].title,'猫咪救助');
+  assert.ok(parsed[0].url.startsWith('https://www.kuaishou.com/search/video?'));
+  assert.throws(()=>parseNativeSource('kuaishou-topics','<html>请登录</html>'),/未提供公开热榜/);
 });
 test('uses most specific category and treats spaces as AND',()=> {
   assert.match(classify('AI萌宠博主新作',rules),/AI萌宠/);

@@ -86,28 +86,54 @@ async function readLimited(response,maxBytes) {
 
 function requestSignal(signal,ms) { return AbortSignal.any([signal,AbortSignal.timeout(ms)]); }
 
+export function parseNativeSource(type,body) {
+  if (type==='kuaishou-topics') {
+    const match=body.match(/window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]+?\});/);
+    if (!match) throw safeError('快手页面未提供公开热榜数据');
+    const client=JSON.parse(match[1]).defaultClient;
+    const rank=client[client.ROOT_QUERY['visionHotRank({"page":"home"})'].id];
+    if (!Array.isArray(rank.items)) throw safeError('快手热榜格式异常');
+    return rank.items.map(ref=>client[ref.id]).filter(item=>item && item.tagType!=='置顶' && typeof item.name==='string')
+      .map(item=>({title:item.name,url:'https://www.kuaishou.com/search/video?searchKey='+encodeURIComponent(item.name)}));
+  }
+  const data=JSON.parse(body);
+  if (data.code!==0 || !Array.isArray(data.data?.list)) throw safeError('B站接口未返回有效榜单');
+  return data.data.list.filter(raw=>typeof raw.bvid==='string' && /^BV[0-9A-Za-z]+$/.test(raw.bvid)
+    && typeof raw.owner?.name==='string' && Number.isFinite(raw.stat?.view) && Number.isFinite(raw.stat?.like))
+    .map(raw=>({title:raw.title,url:'https://www.bilibili.com/video/'+raw.bvid,
+      pubDate:Number(raw.pubdate)*1000,duration:Number(raw.duration),
+      extra:{info:`${raw.owner.name} · ${raw.stat.view}观看 · ${raw.stat.like}点赞`,hover:raw.desc || ''}}));
+}
+
 async function fetchSource(source,config,fetcher,signal) {
   let failure='网络错误';
+  const nativeRoutes={'bilibili-popular':'https://api.bilibili.com/x/web-interface/popular?ps=20&pn=1',
+    'bilibili-ranking':'https://api.bilibili.com/x/web-interface/ranking/v2',
+    'kuaishou-topics':'https://www.kuaishou.com/?isHome=1'};
+  const failures=[];
   for (let attempt=0;attempt<2;attempt++) {
     if (attempt) await new Promise(resolve=>setTimeout(resolve,1000));
     try {
       const use60s=source.provider==='60s' || (attempt===1 && source.fallback_url);
-      const url=use60s ? new URL(source.provider==='60s' ? source.api_urls[Math.min(attempt,source.api_urls.length-1)] : source.fallback_url) : new URL(config.api_url);
-      if (!use60s) url.search=`?id=${encodeURIComponent(source.id)}&latest`;
+      const native=attempt===0 && nativeRoutes[source.native_type];
+      const url=native ? new URL(native) : use60s ? new URL(source.provider==='60s' ? source.api_urls[Math.min(attempt,source.api_urls.length-1)] : source.fallback_url) : new URL(config.api_url);
+      if (!use60s && !native) url.search=`?id=${encodeURIComponent(source.id)}&latest`;
       const response=await fetcher(url,{headers:{'User-Agent':UA,Accept:'application/json'},
         redirect:'error',signal:requestSignal(signal,12000)});
-      if (!response.ok) { await response.body?.cancel(); failure=`HTTP ${response.status}`; continue; }
-      const data=JSON.parse(await readLimited(response,3000000));
+      if (!response.ok) { await response.body?.cancel(); failure=`${native?'直连':'聚合源'} HTTP ${response.status}`; failures.push(failure); continue; }
+      const body=await readLimited(response,3000000);
+      if (native) return {source,items:parseNativeSource(source.native_type,body),error:null};
+      const data=JSON.parse(body);
       if (use60s) {
         if (data.code!==200 || !Array.isArray(data.data)) throw safeError('来源格式异常');
         return {source,items:data.data.map(raw=>({...raw,url:raw.link,heat:raw.score ?? raw.hot_value})),error:null};
       }
       if (!['success','cache'].includes(data.status) || !Array.isArray(data.items)) throw safeError('来源格式异常');
       return {source,items:data.items,error:null};
-    } catch { failure=signal.aborted ? '任务达到时限' : '网络或来源格式错误'; }
+    } catch { failure=signal.aborted ? '任务达到时限' : '网络或来源格式错误'; failures.push(failure); }
     if (signal.aborted) break;
   }
-  return {source,items:[],error:failure};
+  return {source,items:[],error:failures.join('；') || failure};
 }
 
 export async function collectSources(config,fetcher=fetch,signal=AbortSignal.timeout(90000)) {
@@ -157,8 +183,9 @@ export function normalizeItems(results,rules) {
       const item={title,url,category,sources:[source.name],rank:i+1,domain:source.expected_domain,description,
         priority:source.priority ?? 100,source_id:source.id,kind:video?'video':'topic',metrics:video?metrics:'',
         published_at:video && Number.isFinite(raw.pubDate) && raw.pubDate>0 && raw.pubDate<8640000000000000 ? new Date(raw.pubDate).toISOString() : null,
+        duration:video && Number.isFinite(raw.duration) && raw.duration>0 ? raw.duration : null,
         heat:typeof raw.heat==='string' || typeof raw.heat==='number' ? String(raw.heat) : '',
-        video_evidence:video?'平台热门/排行榜上榜；时长、增速与账号历史未核实':null};
+        video_evidence:video?`平台热门/排行榜上榜；${Number.isFinite(raw.duration) && raw.duration>0?'时长来自接口，':'时长、'}增速与账号历史未核实`:null};
       seen.set(key,item); items.push(item);
     }
   }
@@ -168,7 +195,9 @@ export function normalizeItems(results,rules) {
 export function selectItems(items,rules,limit) {
   const names=[...new Set(['AI萌宠热门视频','AI短片热门视频','热门视频作品',...rules.groups.map(x=>x.name),'短视频平台热榜线索'])];
   const buckets=names.map(name=>items.filter(x=>x.category===name)
-    .sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100) || b.sources.length-a.sources.length || a.rank-b.rank));
+    .sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)
+      || (a.kind==='video' && b.kind==='video' ? Number(!(a.duration && a.duration<=600))-Number(!(b.duration && b.duration<=600)) : 0)
+      || b.sources.length-a.sources.length || a.rank-b.rank));
   const selected=[];
   while (selected.length<limit && buckets.some(x=>x.length)) {
     for (const bucket of buckets) if (bucket.length && selected.length<limit) selected.push(bucket.shift());
@@ -254,6 +283,7 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
           [{tag:'a',text:item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文',href:item.url}],
           textRow(`摘要：${item.summary}`));
         if (item.kind==='video') content.push(textRow(`作者与热度：${item.metrics}`),
+          textRow(`视频时长：${item.duration ? Math.floor(item.duration/60)+'分'+Math.floor(item.duration%60)+'秒' : '来源未提供'}`),
           textRow(`发布时间：${item.published_at ? new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.published_at)) : '来源未提供'}`),
           textRow(`依据：${item.video_evidence}；AI类型按标题及简介归类。`));
         else if (item.heat) content.push(textRow(`话题热度：${item.heat}（不是单条视频播放量）`));

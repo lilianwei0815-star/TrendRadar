@@ -13,14 +13,16 @@
       "name": "哔哩哔哩热门视频",
       "expected_domain": "bilibili.com",
       "kind": "video_chart",
-      "priority": 1
+      "priority": 1,
+      "native_type": "bilibili-popular"
     },
     {
       "id": "bilibili-ranking",
       "name": "哔哩哔哩排行榜视频",
       "expected_domain": "bilibili.com",
       "kind": "video_chart",
-      "priority": 1
+      "priority": 1,
+      "native_type": "bilibili-ranking"
     },
     {
       "id": "douyin",
@@ -47,7 +49,8 @@
       "name": "快手热榜",
       "expected_domain": "kuaishou.com",
       "discover_topics": true,
-      "priority": 4
+      "priority": 4,
+      "native_type": "kuaishou-topics"
     },
     {
       "id": "weibo",
