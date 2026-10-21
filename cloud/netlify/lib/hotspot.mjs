@@ -32,9 +32,22 @@ export function loadRules(text=ruleText) {
   return {groups,blocked};
 }
 
+// Animal-welfare reports can legitimately mention these words. Other exclusions
+// and explicit promotional calls to action still take precedence.
+const animalNewsSoftBlocks=new Set(['关注','直播','直播间','低价','点赞','收藏','链接']);
+const animalWelfare=text=>/猫皮|狗皮|猫狗皮毛|(?:猫|狗|犬).{0,12}(?:皮毛|毛皮|皮草)|虐猫|虐狗|虐宠|虐待动物|动物保护|动物救助|宠物纠纷|弃养/.test(text);
+const promotionCall=text=>/广告|推广|带货|优惠券|免费领|点击查看|详情见评论|下单|购买|包邮|领券|加微信|加微|私信|进店|限时抢|扫码|关注.{0,8}(?:领取|领券|抽奖)|(?:点赞|收藏).{0,8}(?:领取|抽奖)/.test(text);
+export function isBlockedTitle(title,rules,sourceCategory='') {
+  const text=normalized(title),category=normalized(sourceCategory);
+  if (rules.blocked.some(word=>category.includes(word))) return true;
+  const matches=rules.blocked.filter(word=>text.includes(word));
+  if (!matches.length) return false;
+  return !(animalWelfare(text) && !promotionCall(text) && matches.every(word=>animalNewsSoftBlocks.has(word)));
+}
+
 export function classify(title,rules) {
   const text=normalized(title);
-  if (rules.blocked.some(word=>text.includes(word))) return null;
+  if (isBlockedTitle(title,rules)) return null;
   let best=null, score=-1;
   for (const group of rules.groups) for (const phrase of group.words) {
     const tokens=normalized(phrase).split(/\s+/).filter(Boolean);
@@ -193,8 +206,7 @@ export function normalizeItems(results,rules) {
       const raw=rawItems[i];
       if (!raw || typeof raw.title!=='string') continue;
       const title=cleanText(raw.title).slice(0,1024);
-      const filterText=normalized(title+' '+(typeof raw.source_category==='string'?raw.source_category:''));
-      if (rules.blocked.some(word=>filterText.includes(word))) continue;
+      if (isBlockedTitle(title,rules,typeof raw.source_category==='string'?raw.source_category:'')) continue;
       const rawUrl=raw.url || raw.mobileUrl;
       const url=typeof rawUrl==='string' ? decodeEntities(rawUrl) : '';
       if (!allowedUrl(url,source.expected_domain)) continue;

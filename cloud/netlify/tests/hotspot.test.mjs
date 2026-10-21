@@ -363,3 +363,21 @@ test('disabled paid source is never requested even with enabled production crede
   assert.equal(report.successful_sources,1);assert.equal(report.messages,0);
   assert.equal(report.source_diagnostics.some(x=>x.id===paid.id),false);
 });
+
+
+test('animal welfare reports survive ambiguous words through the full normalization path',()=> {
+  const titles=['小猫的衣服只能小猫自己穿','商家用猫皮毛做衣服引发关注',
+    '商家直播售卖猫皮大衣','低价售卖狗皮制品被举报','虐猫事件曝光引发关注',
+    '动物保护直播间讨论流浪猫救助'];
+  const items=normalizeItems([result(titles.map((title,i)=>({title,url:'https://www.baidu.com/news/'+i})))],rules);
+  assert.equal(items.length,titles.length);
+  assert.ok(items.every(x=>x.category==='萌宠垂类'));
+});
+test('animal welfare keywords do not whitelist adverts, shopping, calls to action or gaming categories',()=> {
+  const titles=['猫皮大衣低价购买包邮','动物保护推广广告','虐宠话题带货',
+    '猫皮低价点击查看','动物救助关注领取福利','动物保护直播私信进店',
+    '猫皮链接下单','猫咪治愈直播','猫咪治愈引发关注'];
+  const items=normalizeItems([result(titles.map((title,i)=>({title,url:'https://www.baidu.com/news/'+i})))],rules);
+  assert.equal(items.length,0);
+  assert.equal(normalizeItems([result([{title:'虐猫事件引发关注',source_category:'游戏',url:'https://www.baidu.com/news/a'}])],rules).length,0);
+});
