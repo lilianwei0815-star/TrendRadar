@@ -73,7 +73,7 @@ test('groups news into distinct sections without claiming hot-search titles are 
     item('社会热点与舆情','热点事件：官方通报'),item('萌宠垂类','流浪猫被救助'),
     item('网络热梗','这个新梗是什么梗'),item('AI萌宠博主与爆款','AI萌宠短片爆款话题')],settings,[],4,'normal');
   const rows=payloads.flatMap(p=>p.content.post.zh_cn.content);
-  const headings=rows.filter(row=>row[0]?.style?.includes('bold')).map(row=>row[0].text);
+  const headings=rows.filter(row=>row[0]?.text?.startsWith('━━ ')).map(row=>row[0].text);
   assert.deepEqual(headings,[
     '━━ 萌宠与猫狗热点（1条）━━','━━ 网络热梗（1条）━━',
     '━━ 公共社会热点（1条）━━','━━ 其他创作线索（视频热度未核实）（1条）━━']);
@@ -220,6 +220,23 @@ test('connection-test message cannot be confused with a scheduled digest',()=> {
 test('rejects Feishu business errors and never leaks webhook credentials',async()=> {
   await assert.rejects(sendFeishu([{}],webhook,async()=>json({code:19024}),AbortSignal.timeout(1000)),
     e=>!e.message.includes('test-only-not-a-real-token') && /飞书发送失败/.test(e.safeMessage));
+});
+test('only an explicit Feishu format rejection permits one text alternative with all links preserved',async()=> {
+  const sent=[];
+  const payload={msg_type:'post',content:{post:{zh_cn:{title:'热点测试',content:[
+    [{tag:'text',text:'猫咪救助'}],[{tag:'a',text:'观看视频',href:'https://www.douyin.com/video/7698253259862421413'}],
+    [{tag:'text',text:'摘要：来源文案'}]]}}}};
+  assert.equal(await sendFeishu([payload],webhook,async(url,options)=>{
+    sent.push(JSON.parse(options.body)); return json({code:sent.length===1?19002:0});
+  },AbortSignal.timeout(1000)),1);
+  assert.equal(sent.length,2); assert.equal(sent[1].msg_type,'text');
+  assert.match(sent[1].content.text,/热点测试\n猫咪救助/);
+  assert.match(sent[1].content.text,/https:\/\/www.douyin.com\/video\/7698253259862421413/);
+  assert.match(sent[1].content.text,/摘要：来源文案/);
+  let attempts=0;
+  await assert.rejects(sendFeishu([payload],webhook,async()=>{attempts++;throw Error('ambiguous network failure');},
+    AbortSignal.timeout(1000)));
+  assert.equal(attempts,1);
 });
 test('all source failures stop sending rather than claiming no matches',async()=> {
   let sends=0;

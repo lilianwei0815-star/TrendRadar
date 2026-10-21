@@ -348,7 +348,7 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
     for (const label of [...new Set([...ordered,...grouped.keys()])]) {
       const entries=grouped.get(label);
       if (!entries?.length) continue;
-      content.push([{tag:'text',text:`━━ ${label}（${entries.length}条）━━`,style:['bold']}]);
+      content.push([{tag:'text',text:`━━ ${label}（${entries.length}条）━━`}]);
       for (const item of entries) {
         content.push(textRow(`${++number}. ${item.title}`),
           [{tag:'a',text:item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文',href:item.url}],
@@ -387,14 +387,27 @@ export async function sendFeishu(payloads,webhook,fetcher,signal) {
   for (const payload of payloads) {
     let failure='网络或超时';
     try {
-      const response=await fetcher(webhook,{method:'POST',redirect:'error',signal:requestSignal(signal,20000),
-        headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if (!response.ok) { failure=`HTTP ${response.status}`; await response.body?.cancel(); throw Error(); }
-      const data=JSON.parse(await readLimited(response,100000));
-      const code=data.code ?? data.StatusCode;
-      if (code!==0) { failure=`机器人业务码 ${Number.isSafeInteger(code)?code:'未知'}`; throw Error(); }
-      delivered++;
-      console.log(`飞书已确认接收第 ${delivered}/${payloads.length} 条消息`);
+      let outgoing=payload;
+      for (let attempt=0;attempt<2;attempt++) {
+        const response=await fetcher(webhook,{method:'POST',redirect:'error',signal:requestSignal(signal,20000),
+          headers:{'Content-Type':'application/json'},body:JSON.stringify(outgoing)});
+        if (!response.ok) { failure=`HTTP ${response.status}`; await response.body?.cancel(); throw Error(); }
+        const data=JSON.parse(await readLimited(response,100000));
+        const code=data.code ?? data.StatusCode;
+        // Only a definitive format rejection permits one alternate representation.
+        // Never resend on network errors, ambiguous responses or other business errors.
+        if (code===19002 && attempt===0 && payload.msg_type==='post') {
+          const post=payload.content.post.zh_cn;
+          outgoing={msg_type:'text',content:{text:[post.title,...post.content.map(row=>row.map(node=>
+            node.tag==='a'?node.text+' '+node.href:node.text || '').join(''))].join('\n')}};
+          console.log('飞书明确拒绝富文本格式；改用保留标题、链接和摘要的文本格式发送本条');
+          continue;
+        }
+        if (code!==0) { failure=`机器人业务码 ${Number.isSafeInteger(code)?code:'未知'}`; throw Error(); }
+        delivered++;
+        console.log(`飞书已确认接收第 ${delivered}/${payloads.length} 条消息`);
+        break;
+      }
     } catch { throw safeError(`飞书发送失败（此前已确认 ${delivered} 条；${failure}）；未自动重发，请检查机器人及运行记录`); }
     if (delivered<payloads.length) await new Promise(resolve=>setTimeout(resolve,1000));
   }
