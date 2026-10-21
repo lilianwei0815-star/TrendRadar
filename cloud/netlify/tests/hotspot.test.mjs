@@ -11,10 +11,32 @@ const result=(items,s=source)=>({source:s,items,error:null});
 const webhook='https://open.feishu.cn/open-apis/bot/v2/hook/test-only-not-a-real-token';
 const json=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
 
-test('retains all six groups and every exclusion, including positive conflicts',()=> {
-  assert.equal(rules.groups.length,6); assert.equal(rules.blocked.length,24);
+test('retains original interests, adds memes, and preserves every exclusion',()=> {
+  assert.equal(rules.groups.length,7); assert.equal(rules.blocked.length,24);
   for (const word of rules.blocked) assert.equal(classify(`猫咪治愈${word}`,rules),null);
   assert.equal(classify('社会关注',rules),null); assert.equal(classify('宠物 点赞',rules),null);
+});
+test('groups news into distinct sections without claiming hot-search titles are viral videos',()=> {
+  const item=(category,title)=>({category,title,url:'https://www.baidu.com/a',summary:'来源摘要',sources:['百度'],summary_origin:'原文摘要摘录'});
+  const payloads=makePayloads([
+    item('社会热点与舆情','热点事件：官方通报'),item('萌宠垂类','流浪猫被救助'),
+    item('网络热梗','这个新梗是什么梗'),item('AI萌宠博主与爆款','AI萌宠短片爆款话题')],settings,[],4,'normal');
+  const rows=payloads.flatMap(p=>p.content.post.zh_cn.content);
+  const headings=rows.filter(row=>row[0]?.style?.includes('bold')).map(row=>row[0].text);
+  assert.deepEqual(headings,[
+    '━━ 萌宠与猫狗热点（1条）━━','━━ 网络热梗（1条）━━',
+    '━━ 公共社会热点（1条）━━','━━ 其他创作线索（视频热度未核实）（1条）━━']);
+  assert.equal(headings.some(x=>/AI萌宠短片爆款|AI短片爆款|短视频爆款/.test(x)),false);
+  assert.equal(classify('这个新梗是什么梗',rules),'网络热梗');
+  assert.equal(rows.filter(row=>/^\d+\. /.test(row[0]?.text || '')).length,4);
+});
+test('successful collection with no useful matches sends no filler message',async()=> {
+  let sends=0;
+  const report=await runDigest({mode:'normal',webhook,config:{...settings,sources:[source]},fetcher:async url=> {
+    if (String(url).includes('open.feishu.cn')) { sends++; return json({code:0}); }
+    return json({status:'success',items:[{title:'普通内容无关键词',url:'https://www.baidu.com/a'}]});
+  }});
+  assert.equal(report.messages,0); assert.equal(report.delivered,0); assert.equal(sends,0);
 });
 test('uses most specific category and treats spaces as AND',()=> {
   assert.match(classify('AI萌宠博主新作',rules),/AI萌宠/);

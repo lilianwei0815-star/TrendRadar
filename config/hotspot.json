@@ -63,5 +63,102 @@
       "name": "知乎",
       "expected_domain": "zhihu.com"
     }
-  ]
+  ],
+  "presentation": {
+    "hide_empty_sections": true,
+    "section_order_note": "视频在有可核实作品及热度证据后，按 AI萌宠短片 > AI短片 > 普通短视频互斥归类；热搜词不作为爆款证据。",
+    "sections": [
+      {
+        "name": "AI萌宠短片爆款",
+        "categories": [],
+        "requires_video_evidence": true
+      },
+      {
+        "name": "AI短片爆款",
+        "categories": [],
+        "requires_video_evidence": true
+      },
+      {
+        "name": "短视频爆款",
+        "categories": [],
+        "requires_video_evidence": true
+      },
+      {
+        "name": "萌宠与猫狗热点",
+        "categories": [
+          "萌宠垂类"
+        ],
+        "requires_video_evidence": false
+      },
+      {
+        "name": "网络热梗",
+        "categories": [
+          "网络热梗"
+        ],
+        "requires_video_evidence": false
+      },
+      {
+        "name": "公共社会热点",
+        "categories": [
+          "国家大事与重大节点",
+          "社会热点与舆情"
+        ],
+        "requires_video_evidence": false
+      },
+      {
+        "name": "其他创作线索（视频热度未核实）",
+        "categories": [
+          "AI萌宠博主与爆款",
+          "AI短片与动画",
+          "正向情绪共鸣"
+        ],
+        "requires_video_evidence": false
+      }
+    ]
+  },
+  "video_discovery": {
+    "platform": "douyin",
+    "status": "pending_data_source",
+    "discovery_scope": "open_discovery_including_new_and_small_creators",
+    "fixed_item_quota": false,
+    "watchlist_is_exclusive": false,
+    "watchlist": [
+      {
+        "name": "站立起来的影子",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "不吃榨菜AIGC",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "编导李让",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "猫子柒",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "俊俊和朗朗",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "kiki.小奶猫",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      },
+      {
+        "name": "多比啾咪",
+        "profile_url": null,
+        "identity_status": "pending_profile_verification"
+      }
+    ],
+    "evidence_policy": "作品直达链接和可核实的热度证据；缺少历史观测时不声称热度增速或账号异常增长；名称不作为唯一账号标识。"
+  }
 }

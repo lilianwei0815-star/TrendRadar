@@ -197,9 +197,27 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
     [textRow(`本次筛选匹配 ${total} 条，展示 ${items.length} 条；同标题跨平台合并。`)];
   if (mode!=='test') {
     if (!items.length) content.push(textRow('本次暂无匹配内容。已按全部屏蔽词过滤。'));
-    items.forEach((item,i)=>content.push(textRow(`${i+1}. 【${item.category}】${item.title}`),
-      [{tag:'a',text:'查看原文',href:item.url}],textRow(`摘要：${item.summary}`),
-      textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`)));
+    // A hot-search phrase or an AI-related title is not evidence of a viral video.
+    // Viral-video sections are reserved for a future verified video source.
+    // Current hot-list adapters never assign a viral-video section.
+    const sections=config.presentation?.sections || [];
+    const grouped=new Map();
+    for (const item of items) {
+      const section=sections.find(section=>!section.requires_video_evidence && section.categories.includes(item.category));
+      const label=section?.name || '其他创作线索';
+      if (!grouped.has(label)) grouped.set(label,[]);
+      grouped.get(label).push(item);
+    }
+    let number=0;
+    const ordered=[...sections.map(section=>section.name),'其他创作线索'];
+    for (const label of [...new Set([...ordered,...grouped.keys()])]) {
+      const entries=grouped.get(label);
+      if (!entries?.length) continue;
+      content.push([{tag:'text',text:`━━ ${label}（${entries.length}条）━━`,style:['bold']}]);
+      entries.forEach(item=>content.push(textRow(`${++number}. ${item.title}`),
+        [{tag:'a',text:'查看原文',href:item.url}],textRow(`摘要：${item.summary}`),
+        textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`)));
+    }
     if (failed.length) content.push(textRow('部分平台抓取失败：'+failed.join('、')));
     content.push(textRow('覆盖配置中的公开热榜，不包含平台全部视频或私有数据；摘要仅摘录来源。'));
   }
@@ -250,6 +268,11 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
     const candidates=normalizeItems(sourceResults,rules);
     total=candidates.length;
     items=await mapLimit(selectItems(candidates,rules,config.max_items),6,item=>summarize(item,fetcher,signal));
+  }
+  if (mode!=='test' && !items.length) {
+    console.log('本次没有匹配内容，不发送凑数消息');
+    return {mode,matched:total,selected:0,summaries:0,successful_sources:config.sources.length-failed.length,
+      failed_sources:failed,messages:0,delivered:0,...(mode==='preview'?{items:[]}: {})};
   }
   const payloads=makePayloads(items,config,failed,total,mode);
   const delivered=mode==='preview' ? 0 : await sendFeishu(payloads,webhook.trim(),fetcher,signal);
