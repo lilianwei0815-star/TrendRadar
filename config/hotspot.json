@@ -9,15 +9,6 @@
   "max_items": 60,
   "sources": [
     {
-      "id": "douyin-hot-video",
-      "name": "抖音热门视频（聚合数据）",
-      "expected_domain": "douyin.com",
-      "kind": "video_chart",
-      "provider": "juhe-douyin",
-      "priority": 0,
-      "required_video_discovery": true
-    },
-    {
       "id": "bilibili-hot-video",
       "name": "哔哩哔哩热门视频",
       "expected_domain": "bilibili.com",
@@ -193,12 +184,21 @@
   },
   "video_discovery": {
     "platform": "douyin",
-    "status": "douyin_video_adapter_ready_awaiting_free_api_key_and_live_validation",
-    "discovery_scope": "provider_hot_video_chart_not_full_platform_monitoring",
+    "status": "douyin_video_source_unavailable_provider_service_stopped",
+    "discovery_scope": "douyin_topics_only_actual_video_source_not_connected",
     "fixed_item_quota": false,
     "watchlist_enabled": false,
     "watchlist": [],
-    "evidence_policy": "具体作品链接、作者、播放/点赞/评论数；热搜词不作为爆款视频；榜单不代表全站全部作品或实时增速。"
+    "evidence_policy": "具体作品链接、作者、播放/点赞/评论数；热搜词不作为爆款视频；榜单不代表全站全部作品或实时增速。",
+    "blocked_sources": [
+      {
+        "provider": "juhe-douyin",
+        "api_id": 573,
+        "status": "data_source_stopped",
+        "confirmed_on": "2026-10-21",
+        "evidence": "供应商人工客服回复：数据源停服了；恢复时间未确认"
+      }
+    ]
   },
   "coverage": {
     "priority_platforms": [
@@ -211,7 +211,7 @@
     "pending": [
       {
         "name": "抖音具体热门视频",
-        "reason": "免费接口适配已准备；等待配置Key并验证当前榜单数据"
+        "reason": "聚合数据 ID573 的人工客服确认数据源停服；替代来源尚未验收"
       }
     ],
     "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。",
