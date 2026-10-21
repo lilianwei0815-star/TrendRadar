@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {settings} from '../.generated/settings.mjs';
 import {loadRules,classify,allowedUrl,normalizeItems,selectItems,metadataDescriptions,usefulDescription,
-  makePayloads,sendFeishu,runDigest,mapLimit,collectSources,parseNativeSource} from '../lib/hotspot.mjs';
+  makePayloads,sendFeishu,runDigest,mapLimit,collectSources,parseNativeSource,parseDouyinVideos} from '../lib/hotspot.mjs';
 import {signature,authenticate} from '../lib/auth.mjs';
 
 const rules=loadRules();
@@ -10,6 +10,57 @@ const source={id:'baidu',name:'百度',expected_domain:'baidu.com'};
 const result=(items,s=source)=>({source:s,items,error:null});
 const webhook='https://open.feishu.cn/open-apis/bot/v2/hook/test-only-not-a-real-token';
 const json=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+
+const douyinVideo={id:'douyin-hot-video',name:'抖音热门视频',expected_domain:'douyin.com',
+  provider:'juhe-douyin',kind:'video_chart',priority:0,required_video_discovery:true};
+const douyinRaw={title:'AI猫咪的温暖故事',author:'新作者',
+  share_url:'https://www.iesdouyin.com/share/video/6960674964378897677/?tracking=test',
+  play_count:303819638,digg_count:2209478,comment_count:97122};
+
+test('Douyin actual works require a work link and numeric video metrics, not a hot topic',()=> {
+  const rows=parseDouyinVideos(JSON.stringify({error_code:0,result:[douyinRaw,null,
+    {...douyinRaw,share_url:'https://www.douyin.com/hot/123'},
+    {...douyinRaw,share_url:'https://www.iesdouyin.com.evil.test/share/video/6960674964378897677/'},
+    {...douyinRaw,digg_count:'2209478'}, {...douyinRaw,play_count:-1}]}));
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].url,'https://www.douyin.com/video/6960674964378897677');
+  assert.match(rows[0].extra.info,/303819638观看 · 2209478点赞 · 97122评论/);
+  const works=normalizeItems([result(rows,douyinVideo)],rules);
+  assert.equal(works[0].kind,'video'); assert.equal(works[0].category,'AI萌宠热门视频');
+  assert.equal(works[0].required_video_discovery,true);
+  const topics=normalizeItems([result([{...rows[0],url:'https://www.douyin.com/hot/123'}],douyinVideo)],rules);
+  assert.equal(topics.length,0);
+  assert.throws(()=>parseDouyinVideos('{"error_code":10001,"reason":"secret-value"}'),e=>!e.message.includes('secret-value'));
+});
+test('Douyin credentials stay in fixed HTTPS POST; missing key/builds never call; errors never retry or leak',async()=> {
+  const config={...settings,sources:[douyinVideo]};
+  let calls=0;
+  const fetcher=async(url,options)=> {
+    calls++;
+    assert.equal(String(url),'https://apis.juhe.cn/fapig/douyin/billboard');
+    assert.equal(options.method,'POST'); assert.equal(options.redirect,'error');
+    assert.equal(new URLSearchParams(options.body).get('key'),'test-only-key');
+    assert.equal(new URLSearchParams(options.body).get('size'),'50');
+    return json({error_code:0,result:[douyinRaw]});
+  };
+  const missing=await collectSources(config,fetcher,AbortSignal.timeout(1000),{secrets:{}});
+  assert.match(missing[0].error,/待配置/); assert.equal(calls,0);
+  await collectSources(config,fetcher,AbortSignal.timeout(1000),{allowCredentialSources:false,secrets:{JUHE_DOUYIN_API_KEY:'test-only-key'}});
+  assert.equal(calls,0);
+  const good=await collectSources(config,fetcher,AbortSignal.timeout(1000),{secrets:{JUHE_DOUYIN_API_KEY:'test-only-key'}});
+  assert.equal(good[0].items.length,1); assert.equal(calls,1);
+  const bad=await collectSources(config,async()=>{calls++;throw Error('test-only-key');},AbortSignal.timeout(1000),
+    {secrets:{JUHE_DOUYIN_API_KEY:'test-only-key'}});
+  assert.equal(calls,2); assert.ok(bad[0].error); assert.equal(JSON.stringify(bad).includes('test-only-key'),false);
+});
+test('all eligible Douyin chart works precede other platforms within processing limit',()=> {
+  const works=normalizeItems([result(parseDouyinVideos(JSON.stringify({error_code:0,result:[douyinRaw]})),douyinVideo)],rules);
+  const other={...works[0],title:'B站AI故事',source_id:'bilibili',required_video_discovery:false,priority:1,rank:1};
+  const selected=selectItems([other,{...works[0],rank:50}],rules,1);
+  assert.equal(selected[0].source_id,'douyin-hot-video');
+  const blocked=normalizeItems([result(parseDouyinVideos(JSON.stringify({error_code:0,result:[{...douyinRaw,title:'AI猫咪广告'}]})),douyinVideo)],rules);
+  assert.equal(blocked.length,0);
+});
 
 test('retains original interests, adds memes, and preserves every exclusion',()=> {
   assert.equal(rules.groups.length,7); assert.equal(rules.blocked.length,24);

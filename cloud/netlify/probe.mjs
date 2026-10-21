@@ -3,7 +3,7 @@ import {writeFile} from 'node:fs/promises';
 import {settings} from './.generated/settings.mjs';
 import {collectSources,normalizeItems,loadRules} from './lib/hotspot.mjs';
 
-const results=await collectSources(settings);
+const results=await collectSources(settings,fetch,AbortSignal.timeout(90000),{allowCredentialSources:false});
 const rules=loadRules();
 const report={revision:process.env.COMMIT_REF || 'local',checked_at:new Date().toISOString(),
   pending:settings.coverage.pending.map(x=>x.name),

@@ -106,7 +106,39 @@ export function parseNativeSource(type,body) {
       extra:{info:`${raw.owner.name} · ${raw.stat.view}观看 · ${raw.stat.like}点赞`,hover:raw.desc || ''}}));
 }
 
-async function fetchSource(source,config,fetcher,signal) {
+export function parseDouyinVideos(body) {
+  const data=JSON.parse(body);
+  // Do not surface provider errors: they may echo request credentials.
+  if (data.error_code!==0 || !Array.isArray(data.result)) throw safeError('抖音视频接口未返回有效榜单');
+  return data.result.flatMap(raw=> {
+    if (!raw || typeof raw.title!=='string' || typeof raw.author!=='string') return [];
+    let url;
+    try { url=new URL(raw.share_url); } catch { return []; }
+    const id=allowedUrl(url.href,'iesdouyin.com') ? /^\/share\/video\/(\d{15,22})\/?$/.exec(url.pathname)?.[1]
+      : allowedUrl(url.href,'douyin.com') ? /^\/video\/(\d{15,22})\/?$/.exec(url.pathname)?.[1] : null;
+    const counts=[raw.play_count,raw.digg_count,raw.comment_count];
+    if (!id || !counts.every(value=>typeof value==='number' && Number.isSafeInteger(value) && value>=0)) return [];
+    // Strip tracking parameters and use the canonical work URL, never a topic search.
+    return [{title:raw.title,url:'https://www.douyin.com/video/'+id,
+      extra:{info:`${raw.author} · ${raw.play_count}观看 · ${raw.digg_count}点赞 · ${raw.comment_count}评论`}}];
+  });
+}
+
+async function fetchSource(source,config,fetcher,signal,{secrets=process.env,allowCredentialSources=true}={}) {
+  if (source.provider==='juhe-douyin') {
+    if (!allowCredentialSources) return {source,items:[],error:'需运行时凭证验证；构建不调用此接口'};
+    const key=secrets.JUHE_DOUYIN_API_KEY?.trim();
+    if (!key) return {source,items:[],error:'待配置 JUHE_DOUYIN_API_KEY 并验收实际视频数据'};
+    try {
+      // One call per digest, no retries, no paid fallback. Key goes only to this fixed HTTPS endpoint.
+      const response=await fetcher('https://apis.juhe.cn/fapig/douyin/billboard',{
+        method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:new URLSearchParams({key,type:'hot_video',size:'50'}).toString(),
+        redirect:'error',signal:requestSignal(signal,12000)});
+      if (!response.ok) { await response.body?.cancel(); throw Error(); }
+      return {source,items:parseDouyinVideos(await readLimited(response,1000000)),error:null};
+    } catch { return {source,items:[],error:'抖音视频接口失败，请检查免费额度、Key权限及来源数据'}; }
+  }
   let failure='网络错误';
   const nativeRoutes={'bilibili-popular':'https://api.bilibili.com/x/web-interface/popular?ps=20&pn=1',
     'bilibili-ranking':'https://api.bilibili.com/x/web-interface/ranking/v2',
@@ -137,10 +169,10 @@ async function fetchSource(source,config,fetcher,signal) {
   return {source,items:[],error:failures.join('；') || failure};
 }
 
-export async function collectSources(config,fetcher=fetch,signal=AbortSignal.timeout(90000)) {
+export async function collectSources(config,fetcher=fetch,signal=AbortSignal.timeout(90000),options={}) {
   const sourceSignal=AbortSignal.any([signal,AbortSignal.timeout(90000)]);
   return mapLimit([...config.sources].sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)),3,
-    source=>fetchSource(source,config,fetcher,sourceSignal));
+    source=>fetchSource(source,config,fetcher,sourceSignal,options));
 }
 
 export function videoCategory(title,description='') {
@@ -167,13 +199,16 @@ export function normalizeItems(results,rules) {
       const description=['description','summary','desc'].map(k=>typeof raw[k]==='string' ? cleanText(raw[k]).slice(0,10000) : '').find(Boolean)
         || (typeof raw.extra?.hover==='string' ? cleanText(raw.extra.hover).slice(0,10000) : '');
       const metrics=typeof raw.extra?.info==='string' ? cleanText(raw.extra.info).slice(0,500) : '';
-      const video=source.kind==='video_chart' && /\/video\/(?:BV[0-9A-Za-z]+|av\d+)/.test(new URL(url).pathname)
+      const videoPath=new URL(url).pathname;
+      const workLink=(source.expected_domain==='bilibili.com' && /^\/video\/(?:BV[0-9A-Za-z]+|av\d+)\/?$/.test(videoPath))
+        || (source.provider==='juhe-douyin' && source.expected_domain==='douyin.com' && /^\/video\/\d{15,22}\/?$/.test(videoPath));
+      const video=source.kind==='video_chart' && workLink
         && /\d[\d.,wW万亿+]*\s*观看/.test(metrics) && /\d[\d.,wW万亿+]*\s*点赞/.test(metrics);
       if (source.kind==='video_chart' && !video) continue;
       const matched=classify(title,rules);
       const category=video ? videoCategory(title,description) : matched || (source.discover_topics ? '短视频平台热榜线索' : null);
       if (!category) continue;
-      const key=video ? 'video:'+new URL(url).pathname : 'topic:'+normalized(title).replace(/[^\p{L}\p{N}]/gu,'');
+      const key=video ? 'video:'+source.expected_domain+new URL(url).pathname : 'topic:'+normalized(title).replace(/[^\p{L}\p{N}]/gu,'');
       if (seen.has(key)) {
         const old=seen.get(key);
         if (!old.sources.includes(source.name)) old.sources.push(source.name);
@@ -184,6 +219,7 @@ export function normalizeItems(results,rules) {
       }
       const item={title,url,category,sources:[source.name],rank:i+1,domain:source.expected_domain,description,
         priority:source.priority ?? 100,source_id:source.id,kind:video?'video':'topic',metrics:video?metrics:'',
+        required_video_discovery:video && source.required_video_discovery===true,
         published_at:video && Number.isFinite(raw.pubDate) && raw.pubDate>0 && raw.pubDate<8640000000000000 ? new Date(raw.pubDate).toISOString() : null,
         duration:video && Number.isFinite(raw.duration) && raw.duration>0 ? raw.duration : null,
         heat:typeof raw.heat==='string' || typeof raw.heat==='number' ? String(raw.heat) : '',
@@ -195,6 +231,8 @@ export function normalizeItems(results,rules) {
 }
 
 export function selectItems(items,rules,limit) {
+  const required=items.filter(item=>item.required_video_discovery).sort((a,b)=>a.rank-b.rank);
+  items=items.filter(item=>!item.required_video_discovery);
   const names=[...new Set(['AI萌宠热门视频','AI短片热门视频','热门视频作品',...rules.groups.map(x=>x.name),'短视频平台热榜线索'])];
   const orderCategory=entries=> {
     const ordered=[];
@@ -218,7 +256,7 @@ export function selectItems(items,rules,limit) {
     return ordered;
   };
   const buckets=names.map(name=>orderCategory(items.filter(x=>x.category===name)));
-  const selected=[];
+  const selected=required.slice(0,limit);
   while (selected.length<limit && buckets.some(x=>x.length)) {
     for (const bucket of buckets) if (bucket.length && selected.length<limit) selected.push(bucket.shift());
   }

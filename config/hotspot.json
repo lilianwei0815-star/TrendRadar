@@ -9,6 +9,15 @@
   "max_items": 60,
   "sources": [
     {
+      "id": "douyin-hot-video",
+      "name": "抖音热门视频（聚合数据）",
+      "expected_domain": "douyin.com",
+      "kind": "video_chart",
+      "provider": "juhe-douyin",
+      "priority": 0,
+      "required_video_discovery": true
+    },
+    {
       "id": "bilibili-hot-video",
       "name": "哔哩哔哩热门视频",
       "expected_domain": "bilibili.com",
@@ -184,48 +193,12 @@
   },
   "video_discovery": {
     "platform": "douyin",
-    "status": "bilibili_chart_active_douyin_creator_monitoring_pending",
-    "discovery_scope": "open_discovery_including_new_and_small_creators",
+    "status": "douyin_video_adapter_ready_awaiting_free_api_key_and_live_validation",
+    "discovery_scope": "provider_hot_video_chart_not_full_platform_monitoring",
     "fixed_item_quota": false,
-    "watchlist_is_exclusive": false,
-    "watchlist": [
-      {
-        "name": "站立起来的影子",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "不吃榨菜AIGC",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "编导李让",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "猫子柒",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "俊俊和朗朗",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "kiki.小奶猫",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      },
-      {
-        "name": "多比啾咪",
-        "profile_url": null,
-        "identity_status": "pending_profile_verification"
-      }
-    ],
-    "evidence_policy": "作品直达链接和可核实的热度证据；缺少历史观测时不声称热度增速或账号异常增长；名称不作为唯一账号标识。"
+    "watchlist_enabled": false,
+    "watchlist": [],
+    "evidence_policy": "具体作品链接、作者、播放/点赞/评论数；热搜词不作为爆款视频；榜单不代表全站全部作品或实时增速。"
   },
   "coverage": {
     "priority_platforms": [
@@ -233,15 +206,18 @@
       "小红书",
       "哔哩哔哩",
       "快手",
-      "微博",
-      "视频号"
+      "微博"
     ],
     "pending": [
       {
-        "name": "视频号",
-        "reason": "尚未找到并验证稳定免费的公开热榜或搜索数据源"
+        "name": "抖音具体热门视频",
+        "reason": "免费接口适配已准备；等待配置Key并验证当前榜单数据"
       }
     ],
-    "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。"
+    "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。",
+    "deferred": [
+      "视频号",
+      "指定博主监测"
+    ]
   }
 }
