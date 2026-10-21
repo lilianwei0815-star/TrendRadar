@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {settings} from '../.generated/settings.mjs';
 import {loadRules,classify,allowedUrl,normalizeItems,selectItems,metadataDescriptions,usefulDescription,
-  makePayloads,sendFeishu,runDigest,mapLimit} from '../lib/hotspot.mjs';
+  makePayloads,sendFeishu,runDigest,mapLimit,collectSources} from '../lib/hotspot.mjs';
 import {signature,authenticate} from '../lib/auth.mjs';
 
 const rules=loadRules();
@@ -37,6 +37,68 @@ test('successful collection with no useful matches sends no filler message',asyn
     return json({status:'success',items:[{title:'普通内容无关键词',url:'https://www.baidu.com/a'}]});
   }});
   assert.equal(report.messages,0); assert.equal(report.delivered,0); assert.equal(sends,0);
+});
+test('priority social-platform topics survive without literal interest words, while blocked titles do not',()=> {
+  const platform={id:'douyin',name:'抖音',expected_domain:'douyin.com',discover_topics:true,priority:2};
+  const selected=normalizeItems([result([
+    {title:'这一幕让人久久难忘',url:'https://www.douyin.com/hot/123'},
+    {title:'这一幕直播',url:'https://www.douyin.com/hot/124'}],platform)],rules);
+  assert.equal(selected.length,1); assert.equal(selected[0].category,'短视频平台热榜线索');
+  assert.equal(selected[0].kind,'topic'); assert.equal(selected[0].video_evidence,null);
+});
+test('cross-platform duplicates prefer the higher-priority platform link',()=> {
+  const news={name:'新闻',expected_domain:'baidu.com',priority:50};
+  const social={name:'抖音',id:'douyin',expected_domain:'douyin.com',priority:2};
+  const items=normalizeItems([result([{title:'猫咪救助',url:'https://www.baidu.com/a'}],news),
+    result([{title:'猫咪救助',url:'https://www.douyin.com/hot/1'}],social)],rules);
+  assert.equal(items.length,1); assert.equal(items[0].url,'https://www.douyin.com/hot/1');
+  assert.deepEqual(items[0].sources,['新闻','抖音']);
+});
+test('video sections require chart provenance, a video URL and actual metric text; video URLs deduplicate',()=> {
+  const platform={id:'bilibili-hot-video',name:'B站热门',expected_domain:'bilibili.com',kind:'video_chart',priority:1};
+  const raw={title:'AI猫咪的暖心故事',url:'https://www.bilibili.com/video/BVtest001',pubDate:1792530000000,
+    extra:{info:'作者甲 · 12w+观看 · 3000点赞',hover:'AI猫咪每天照顾社区里的小动物，陪伴大家度过寒冷天气。'}};
+  const items=normalizeItems([result([raw,{...raw,url:'https://www.bilibili.com/video/BVtest002'},
+    {...raw,url:'https://search.bilibili.com/all?keyword=猫咪'},
+    {...raw,title:'AI狗的故事',extra:{info:'观看点赞数据缺失'}}],platform),result([raw],platform)],rules);
+  assert.equal(items.length,2); assert.ok(items.every(x=>x.category==='AI萌宠热门视频' && x.kind==='video'));
+  const payload=JSON.stringify(makePayloads(items,settings,[],2,'normal'));
+  assert.match(payload,/AI萌宠视频｜热门作品/); assert.match(payload,/观看视频/);
+  assert.match(payload,/12w\+观看/); assert.match(payload,/时长、增速与账号历史未核实/);
+  assert.equal(normalizeItems([result([raw],{...platform,kind:'topic'})],rules)[0].video_evidence,null);
+});
+test('source priority affects selection within an interest category',()=> {
+  const selected=selectItems([{category:'萌宠垂类',title:'文章',priority:50,sources:['新闻'],rank:1},
+    {category:'萌宠垂类',title:'平台主题',priority:2,sources:['抖音'],rank:20}],rules,1);
+  assert.equal(selected[0].title,'平台主题');
+});
+test('60s adapters validate their response and fall back without removing the platform identity',async()=> {
+  const platform={id:'rednote',name:'小红书热榜',expected_domain:'xiaohongshu.com',provider:'60s',
+    api_urls:['https://first.test/v2/rednote','https://second.test/v2/rednote'],discover_topics:true,priority:3};
+  const calls=[];
+  const results=await collectSources({...settings,sources:[platform]},async url=> {
+    calls.push(String(url));
+    if (calls.length===1) return json({code:500,data:[]});
+    return json({code:200,data:[{title:'创意作品新趋势',link:'https://www.xiaohongshu.com/search_result?keyword=x',score:'947.5w'}]});
+  });
+  assert.equal(calls.length,2); assert.equal(results[0].error,null);
+  const items=normalizeItems(results,rules);
+  assert.equal(items[0].heat,'947.5w'); assert.equal(items[0].kind,'topic');
+  assert.equal(items[0].source_id,'rednote');
+});
+test('unresponsive article pages exhaust only the summary budget and do not cancel Feishu delivery',async()=> {
+  let sent=0;
+  const report=await runDigest({mode:'normal',webhook,config:{...settings,sources:[source],summary_budget_ms:15},fetcher:async (url,options)=> {
+    if (String(url).includes('newsnow')) return json({status:'success',items:[{title:'猫咪救助',url:'https://www.baidu.com/a'}]});
+    if (String(url).includes('open.feishu.cn')) {
+      assert.equal(options.signal.aborted,false); sent++; return json({code:0});
+    }
+    return new Promise((resolve,reject)=> {
+      const timer=setTimeout(()=>resolve(new Response('too late')),1000);
+      options.signal.addEventListener('abort',()=>{clearTimeout(timer);reject(Error('timeout'));},{once:true});
+    });
+  }});
+  assert.equal(report.summaries,0); assert.equal(report.delivered,1); assert.equal(sent,1);
 });
 test('uses most specific category and treats spaces as AND',()=> {
   assert.match(classify('AI萌宠博主新作',rules),/AI萌宠/);

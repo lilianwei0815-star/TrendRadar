@@ -2,3 +2,4 @@
 node_modules/
 .netlify/
 public/deployment.json
+public/source-status.json

@@ -9,79 +9,142 @@
   "max_items": 60,
   "sources": [
     {
-      "id": "toutiao",
-      "name": "今日头条",
-      "expected_domain": "toutiao.com"
+      "id": "bilibili-hot-video",
+      "name": "哔哩哔哩热门视频",
+      "expected_domain": "bilibili.com",
+      "kind": "video_chart",
+      "priority": 1
     },
     {
-      "id": "baidu",
-      "name": "百度热搜",
-      "expected_domain": "baidu.com"
-    },
-    {
-      "id": "wallstreetcn-hot",
-      "name": "华尔街见闻",
-      "expected_domain": "wallstreetcn.com"
-    },
-    {
-      "id": "thepaper",
-      "name": "澎湃新闻",
-      "expected_domain": "thepaper.cn"
-    },
-    {
-      "id": "bilibili-hot-search",
-      "name": "bilibili 热搜",
-      "expected_domain": "bilibili.com"
-    },
-    {
-      "id": "cls-hot",
-      "name": "财联社热门",
-      "expected_domain": "cls.cn"
-    },
-    {
-      "id": "ifeng",
-      "name": "凤凰网",
-      "expected_domain": "ifeng.com"
-    },
-    {
-      "id": "tieba",
-      "name": "贴吧",
-      "expected_domain": "baidu.com"
-    },
-    {
-      "id": "weibo",
-      "name": "微博",
-      "expected_domain": "weibo.com"
+      "id": "bilibili-ranking",
+      "name": "哔哩哔哩排行榜视频",
+      "expected_domain": "bilibili.com",
+      "kind": "video_chart",
+      "priority": 1
     },
     {
       "id": "douyin",
       "name": "抖音",
-      "expected_domain": "douyin.com"
+      "expected_domain": "douyin.com",
+      "discover_topics": true,
+      "fallback_url": "https://60s.crystelf.top/v2/douyin",
+      "priority": 2
+    },
+    {
+      "id": "rednote",
+      "name": "小红书热榜",
+      "expected_domain": "xiaohongshu.com",
+      "provider": "60s",
+      "api_urls": [
+        "https://60s.crystelf.top/v2/rednote",
+        "https://api.elysiayanyu.top/v2/rednote"
+      ],
+      "discover_topics": true,
+      "priority": 3
+    },
+    {
+      "id": "kuaishou",
+      "name": "快手热榜",
+      "expected_domain": "kuaishou.com",
+      "discover_topics": true,
+      "priority": 4
+    },
+    {
+      "id": "weibo",
+      "name": "微博",
+      "expected_domain": "weibo.com",
+      "discover_topics": true,
+      "fallback_url": "https://60s.crystelf.top/v2/weibo",
+      "priority": 5
+    },
+    {
+      "id": "bilibili-hot-search",
+      "name": "bilibili 热搜",
+      "expected_domain": "bilibili.com",
+      "discover_topics": true,
+      "fallback_url": "https://60s.crystelf.top/v2/bili",
+      "priority": 6
+    },
+    {
+      "id": "toutiao",
+      "name": "今日头条",
+      "expected_domain": "toutiao.com",
+      "priority": 50
+    },
+    {
+      "id": "baidu",
+      "name": "百度热搜",
+      "expected_domain": "baidu.com",
+      "priority": 50
+    },
+    {
+      "id": "wallstreetcn-hot",
+      "name": "华尔街见闻",
+      "expected_domain": "wallstreetcn.com",
+      "priority": 50
+    },
+    {
+      "id": "thepaper",
+      "name": "澎湃新闻",
+      "expected_domain": "thepaper.cn",
+      "priority": 50
+    },
+    {
+      "id": "cls-hot",
+      "name": "财联社热门",
+      "expected_domain": "cls.cn",
+      "priority": 50
+    },
+    {
+      "id": "ifeng",
+      "name": "凤凰网",
+      "expected_domain": "ifeng.com",
+      "priority": 50
+    },
+    {
+      "id": "tieba",
+      "name": "贴吧",
+      "expected_domain": "baidu.com",
+      "priority": 100
     },
     {
       "id": "zhihu",
       "name": "知乎",
-      "expected_domain": "zhihu.com"
+      "expected_domain": "zhihu.com",
+      "priority": 100
     }
   ],
   "presentation": {
     "hide_empty_sections": true,
-    "section_order_note": "视频在有可核实作品及热度证据后，按 AI萌宠短片 > AI短片 > 普通短视频互斥归类；热搜词不作为爆款证据。",
+    "section_order_note": "优先视频作品与短视频/社交平台主题，再补充其他来源；视频上榜证据不代表增速、账号历史或时长已核实；AI分类基于标题和简介。",
     "sections": [
       {
-        "name": "AI萌宠短片爆款",
-        "categories": [],
+        "name": "AI萌宠视频｜热门作品",
+        "categories": [
+          "AI萌宠热门视频"
+        ],
         "requires_video_evidence": true
       },
       {
-        "name": "AI短片爆款",
-        "categories": [],
+        "name": "AI短片｜热门作品",
+        "categories": [
+          "AI短片热门视频"
+        ],
         "requires_video_evidence": true
       },
       {
-        "name": "短视频爆款",
-        "categories": [],
+        "name": "视频爆款线索｜平台热门作品",
+        "categories": [
+          "热门视频作品"
+        ],
         "requires_video_evidence": true
+      },
+      {
+        "name": "短视频与社交平台热榜线索",
+        "categories": [
+          "短视频平台热榜线索"
+        ],
+        "requires_video_evidence": false
       },
       {
         "name": "萌宠与猫狗热点",
@@ -118,7 +181,7 @@
   },
   "video_discovery": {
     "platform": "douyin",
-    "status": "pending_data_source",
+    "status": "bilibili_chart_active_douyin_creator_monitoring_pending",
     "discovery_scope": "open_discovery_including_new_and_small_creators",
     "fixed_item_quota": false,
     "watchlist_is_exclusive": false,
@@ -160,5 +223,22 @@
       }
     ],
     "evidence_policy": "作品直达链接和可核实的热度证据；缺少历史观测时不声称热度增速或账号异常增长；名称不作为唯一账号标识。"
+  },
+  "coverage": {
+    "priority_platforms": [
+      "抖音",
+      "小红书",
+      "哔哩哔哩",
+      "快手",
+      "微博",
+      "视频号"
+    ],
+    "pending": [
+      {
+        "name": "视频号",
+        "reason": "尚未找到并验证稳定免费的公开热榜或搜索数据源"
+      }
+    ],
+    "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。"
   }
 }

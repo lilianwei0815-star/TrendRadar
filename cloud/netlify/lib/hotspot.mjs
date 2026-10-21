@@ -87,22 +87,41 @@ async function readLimited(response,maxBytes) {
 function requestSignal(signal,ms) { return AbortSignal.any([signal,AbortSignal.timeout(ms)]); }
 
 async function fetchSource(source,config,fetcher,signal) {
-  const url=new URL(config.api_url);
-  url.search=`?id=${encodeURIComponent(source.id)}&latest`;
   let failure='网络错误';
   for (let attempt=0;attempt<2;attempt++) {
     if (attempt) await new Promise(resolve=>setTimeout(resolve,1000));
     try {
+      const use60s=source.provider==='60s' || (attempt===1 && source.fallback_url);
+      const url=use60s ? new URL(source.provider==='60s' ? source.api_urls[Math.min(attempt,source.api_urls.length-1)] : source.fallback_url) : new URL(config.api_url);
+      if (!use60s) url.search=`?id=${encodeURIComponent(source.id)}&latest`;
       const response=await fetcher(url,{headers:{'User-Agent':UA,Accept:'application/json'},
         redirect:'error',signal:requestSignal(signal,12000)});
       if (!response.ok) { await response.body?.cancel(); failure=`HTTP ${response.status}`; continue; }
       const data=JSON.parse(await readLimited(response,3000000));
+      if (use60s) {
+        if (data.code!==200 || !Array.isArray(data.data)) throw safeError('来源格式异常');
+        return {source,items:data.data.map(raw=>({...raw,url:raw.link,heat:raw.score ?? raw.hot_value})),error:null};
+      }
       if (!['success','cache'].includes(data.status) || !Array.isArray(data.items)) throw safeError('来源格式异常');
       return {source,items:data.items,error:null};
     } catch { failure=signal.aborted ? '任务达到时限' : '网络或来源格式错误'; }
     if (signal.aborted) break;
   }
   return {source,items:[],error:failure};
+}
+
+export async function collectSources(config,fetcher=fetch,signal=AbortSignal.timeout(90000)) {
+  const sourceSignal=AbortSignal.any([signal,AbortSignal.timeout(90000)]);
+  return mapLimit([...config.sources].sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)),3,
+    source=>fetchSource(source,config,fetcher,sourceSignal));
+}
+
+export function videoCategory(title,description='') {
+  const text=normalized(title+' '+description);
+  const ai=/\bai\b|aigc|ai动画|ai短片|ai短剧|ai萌宠|ai猫|ai狗|人工智能生成/.test(text);
+  if (ai && /猫|狗|萌宠|宠物/.test(text)) return 'AI萌宠热门视频';
+  if (ai && /动画|短片|短剧|剧情|故事/.test(text)) return 'AI短片热门视频';
+  return '热门视频作品';
 }
 
 export function normalizeItems(results,rules) {
@@ -112,18 +131,34 @@ export function normalizeItems(results,rules) {
     for (let i=0;i<rawItems.length;i++) {
       const raw=rawItems[i];
       if (!raw || typeof raw.title!=='string') continue;
-      const title=cleanText(raw.title).slice(0,1024), category=classify(title,rules);
+      const title=cleanText(raw.title).slice(0,1024);
+      if (rules.blocked.some(word=>normalized(title).includes(word))) continue;
       const rawUrl=raw.url || raw.mobileUrl;
       const url=typeof rawUrl==='string' ? decodeEntities(rawUrl) : '';
-      if (!category || !allowedUrl(url,source.expected_domain)) continue;
-      const key=normalized(title).replace(/[^\p{L}\p{N}]/gu,'');
+      if (!allowedUrl(url,source.expected_domain)) continue;
+      const description=['description','summary','desc'].map(k=>typeof raw[k]==='string' ? cleanText(raw[k]).slice(0,10000) : '').find(Boolean)
+        || (typeof raw.extra?.hover==='string' ? cleanText(raw.extra.hover).slice(0,10000) : '');
+      const metrics=typeof raw.extra?.info==='string' ? cleanText(raw.extra.info).slice(0,500) : '';
+      const video=source.kind==='video_chart' && /\/video\/(?:BV[0-9A-Za-z]+|av\d+)/.test(new URL(url).pathname)
+        && /\d[\d.,wW万亿+]*\s*观看/.test(metrics) && /\d[\d.,wW万亿+]*\s*点赞/.test(metrics);
+      if (source.kind==='video_chart' && !video) continue;
+      const matched=classify(title,rules);
+      const category=video ? videoCategory(title,description) : matched || (source.discover_topics ? '短视频平台热榜线索' : null);
+      if (!category) continue;
+      const key=video ? 'video:'+new URL(url).pathname : 'topic:'+normalized(title).replace(/[^\p{L}\p{N}]/gu,'');
       if (seen.has(key)) {
         const old=seen.get(key);
         if (!old.sources.includes(source.name)) old.sources.push(source.name);
+        if ((source.priority ?? 100)<old.priority) {
+          Object.assign(old,{url,domain:source.expected_domain,priority:source.priority,source_id:source.id});
+        }
         old.rank=Math.min(old.rank,i+1); continue;
       }
-      const description=['description','summary','desc'].map(k=>typeof raw[k]==='string' ? cleanText(raw[k]).slice(0,10000) : '').find(Boolean) || '';
-      const item={title,url,category,sources:[source.name],rank:i+1,domain:source.expected_domain,description};
+      const item={title,url,category,sources:[source.name],rank:i+1,domain:source.expected_domain,description,
+        priority:source.priority ?? 100,source_id:source.id,kind:video?'video':'topic',metrics:video?metrics:'',
+        published_at:video && Number.isFinite(raw.pubDate) && raw.pubDate>0 && raw.pubDate<8640000000000000 ? new Date(raw.pubDate).toISOString() : null,
+        heat:typeof raw.heat==='string' || typeof raw.heat==='number' ? String(raw.heat) : '',
+        video_evidence:video?'平台热门/排行榜上榜；时长、增速与账号历史未核实':null};
       seen.set(key,item); items.push(item);
     }
   }
@@ -131,8 +166,9 @@ export function normalizeItems(results,rules) {
 }
 
 export function selectItems(items,rules,limit) {
-  const buckets=rules.groups.map(group=>items.filter(x=>x.category===group.name)
-    .sort((a,b)=>b.sources.length-a.sources.length || a.rank-b.rank));
+  const names=[...new Set(['AI萌宠热门视频','AI短片热门视频','热门视频作品',...rules.groups.map(x=>x.name),'短视频平台热榜线索'])];
+  const buckets=names.map(name=>items.filter(x=>x.category===name)
+    .sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100) || b.sources.length-a.sources.length || a.rank-b.rank));
   const selected=[];
   while (selected.length<limit && buckets.some(x=>x.length)) {
     for (const bucket of buckets) if (bucket.length && selected.length<limit) selected.push(bucket.shift());
@@ -197,13 +233,12 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
     [textRow(`本次筛选匹配 ${total} 条，展示 ${items.length} 条；同标题跨平台合并。`)];
   if (mode!=='test') {
     if (!items.length) content.push(textRow('本次暂无匹配内容。已按全部屏蔽词过滤。'));
-    // A hot-search phrase or an AI-related title is not evidence of a viral video.
-    // Viral-video sections are reserved for a future verified video source.
-    // Current hot-list adapters never assign a viral-video section.
+    // Only actual video-chart entries with a video URL and metrics can enter video sections.
     const sections=config.presentation?.sections || [];
     const grouped=new Map();
     for (const item of items) {
-      const section=sections.find(section=>!section.requires_video_evidence && section.categories.includes(item.category));
+      const section=sections.find(section=>section.categories.includes(item.category)
+        && (!section.requires_video_evidence || (item.kind==='video' && item.video_evidence)));
       const label=section?.name || '其他创作线索';
       if (!grouped.has(label)) grouped.set(label,[]);
       grouped.get(label).push(item);
@@ -214,11 +249,19 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
       const entries=grouped.get(label);
       if (!entries?.length) continue;
       content.push([{tag:'text',text:`━━ ${label}（${entries.length}条）━━`,style:['bold']}]);
-      entries.forEach(item=>content.push(textRow(`${++number}. ${item.title}`),
-        [{tag:'a',text:'查看原文',href:item.url}],textRow(`摘要：${item.summary}`),
-        textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`)));
+      for (const item of entries) {
+        content.push(textRow(`${++number}. ${item.title}`),
+          [{tag:'a',text:item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文',href:item.url}],
+          textRow(`摘要：${item.summary}`));
+        if (item.kind==='video') content.push(textRow(`作者与热度：${item.metrics}`),
+          textRow(`发布时间：${item.published_at ? new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.published_at)) : '来源未提供'}`),
+          textRow(`依据：${item.video_evidence}；AI类型按标题及简介归类。`));
+        else if (item.heat) content.push(textRow(`话题热度：${item.heat}（不是单条视频播放量）`));
+        content.push(textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`));
+      }
     }
     if (failed.length) content.push(textRow('部分平台抓取失败：'+failed.join('、')));
+    if (config.coverage?.pending?.length) content.push(textRow('尚未接通：'+config.coverage.pending.map(x=>x.name).join('、')+'；不代表这些平台没有热点。'));
     content.push(textRow('覆盖配置中的公开热榜，不包含平台全部视频或私有数据；摘要仅摘录来源。'));
   }
   const payload=(rows,part)=>({msg_type:'post',content:{post:{zh_cn:{title:`萌宠创作热点｜${stamp}｜第${part}条消息`,content:rows}}}});
@@ -261,22 +304,28 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
   let items=[],failed=[],total=0,sourceResults=[];
   if (mode!=='test') {
     const rules=loadRules();
-    sourceResults=await mapLimit(config.sources,2,source=>fetchSource(source,config,fetcher,signal));
+    sourceResults=await collectSources(config,fetcher,signal);
     failed=sourceResults.filter(x=>x.error).map(x=>x.source.name);
     for (const result of sourceResults) console.log(`${result.source.name}：${result.error || `获取 ${result.items.length} 条`}`);
     if (failed.length===config.sources.length) throw safeError('所有平台均抓取失败，停止发送，避免误报暂无新闻');
     const candidates=normalizeItems(sourceResults,rules);
     total=candidates.length;
-    items=await mapLimit(selectItems(candidates,rules,config.max_items),6,item=>summarize(item,fetcher,signal));
+    // Reserve time for delivery even when article pages are slow or inaccessible.
+    const summarySignal=AbortSignal.any([signal,AbortSignal.timeout(Math.min(config.summary_budget_ms || 75000,75000))]);
+    items=await mapLimit(selectItems(candidates,rules,config.max_items),6,item=>summarize(item,fetcher,summarySignal));
   }
+  const sourceDiagnostics=sourceResults.map(result=>({id:result.source.id,name:result.source.name,
+    fetched:result.items.length,error:result.error,matched:normalizeItems([result],loadRules()).length,
+    selected:items.filter(item=>item.sources.includes(result.source.name)).length}));
   if (mode!=='test' && !items.length) {
     console.log('本次没有匹配内容，不发送凑数消息');
     return {mode,matched:total,selected:0,summaries:0,successful_sources:config.sources.length-failed.length,
-      failed_sources:failed,messages:0,delivered:0,...(mode==='preview'?{items:[]}: {})};
+      failed_sources:failed,source_diagnostics:sourceDiagnostics,messages:0,delivered:0,...(mode==='preview'?{items:[]}: {})};
   }
   const payloads=makePayloads(items,config,failed,total,mode);
   const delivered=mode==='preview' ? 0 : await sendFeishu(payloads,webhook.trim(),fetcher,signal);
   return {mode,matched:total,selected:items.length,summaries:items.filter(x=>x.summary_origin!=='摘要暂缺').length,
     successful_sources:mode==='test'?0:config.sources.length-failed.length,failed_sources:failed,
+    source_diagnostics:sourceDiagnostics,
     messages:payloads.length,delivered,...(mode==='preview'?{items}: {})};
 }

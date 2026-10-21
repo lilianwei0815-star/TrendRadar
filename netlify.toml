@@ -1,6 +1,6 @@
 [build]
   base = "cloud/netlify"
-  command = "npm test"
+  command = "npm test && node probe.mjs"
   publish = "public"
   functions = "functions"
 
