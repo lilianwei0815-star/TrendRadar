@@ -102,6 +102,7 @@ export function parseNativeSource(type,body) {
     && typeof raw.owner?.name==='string' && Number.isFinite(raw.stat?.view) && Number.isFinite(raw.stat?.like))
     .map(raw=>({title:raw.title,url:'https://www.bilibili.com/video/'+raw.bvid,
       pubDate:Number(raw.pubdate)*1000,duration:Number(raw.duration),
+      source_category:raw.tname==='电子竞技'?'游戏':raw.tname || '',
       extra:{info:`${raw.owner.name} · ${raw.stat.view}观看 · ${raw.stat.like}点赞`,hover:raw.desc || ''}}));
 }
 
@@ -158,7 +159,8 @@ export function normalizeItems(results,rules) {
       const raw=rawItems[i];
       if (!raw || typeof raw.title!=='string') continue;
       const title=cleanText(raw.title).slice(0,1024);
-      if (rules.blocked.some(word=>normalized(title).includes(word))) continue;
+      const filterText=normalized(title+' '+(typeof raw.source_category==='string'?raw.source_category:''));
+      if (rules.blocked.some(word=>filterText.includes(word))) continue;
       const rawUrl=raw.url || raw.mobileUrl;
       const url=typeof rawUrl==='string' ? decodeEntities(rawUrl) : '';
       if (!allowedUrl(url,source.expected_domain)) continue;
@@ -194,10 +196,28 @@ export function normalizeItems(results,rules) {
 
 export function selectItems(items,rules,limit) {
   const names=[...new Set(['AI萌宠热门视频','AI短片热门视频','热门视频作品',...rules.groups.map(x=>x.name),'短视频平台热榜线索'])];
-  const buckets=names.map(name=>items.filter(x=>x.category===name)
-    .sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)
-      || (a.kind==='video' && b.kind==='video' ? Number(!(a.duration && a.duration<=600))-Number(!(b.duration && b.duration<=600)) : 0)
-      || b.sources.length-a.sources.length || a.rank-b.rank));
+  const orderCategory=entries=> {
+    const ordered=[];
+    // Prioritize social/video platforms while interleaving them so that one
+    // platform's long hot list cannot crowd every other platform out.
+    for (const priorityTier of [true,false]) {
+      const sources=new Map();
+      const tier=entries.filter(item=>((item.priority ?? 100)<10)===priorityTier)
+        .sort((a,b)=>(a.priority ?? 100)-(b.priority ?? 100)
+          || (a.kind==='video' && b.kind==='video' ? Number(!(a.duration && a.duration<=600))-Number(!(b.duration && b.duration<=600)) : 0)
+          || b.sources.length-a.sources.length || a.rank-b.rank);
+      for (const item of tier) {
+        const key=item.source_id || item.sources[0];
+        if (!sources.has(key)) sources.set(key,[]);
+        sources.get(key).push(item);
+      }
+      while ([...sources.values()].some(values=>values.length)) {
+        for (const values of sources.values()) if (values.length) ordered.push(values.shift());
+      }
+    }
+    return ordered;
+  };
+  const buckets=names.map(name=>orderCategory(items.filter(x=>x.category===name)));
   const selected=[];
   while (selected.length<limit && buckets.some(x=>x.length)) {
     for (const bucket of buckets) if (bucket.length && selected.length<limit) selected.push(bucket.shift());

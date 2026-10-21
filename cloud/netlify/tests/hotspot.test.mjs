@@ -72,6 +72,14 @@ test('source priority affects selection within an interest category',()=> {
     {category:'萌宠垂类',title:'平台主题',priority:2,sources:['抖音'],rank:20}],rules,1);
   assert.equal(selected[0].title,'平台主题');
 });
+test('one priority platform cannot crowd out every other priority platform',()=> {
+  const rows=[];
+  for (const [source_id,priority] of [['douyin',2],['rednote',3],['weibo',5],['bilibili',6]]) {
+    for (let i=0;i<30;i++) rows.push({category:'短视频平台热榜线索',source_id,priority,rank:i+1,sources:[source_id]});
+  }
+  const selected=selectItems(rows,rules,4);
+  assert.deepEqual(selected.map(x=>x.source_id),['douyin','rednote','weibo','bilibili']);
+});
 test('60s adapters validate their response and fall back without removing the platform identity',async()=> {
   const platform={id:'rednote',name:'小红书热榜',expected_domain:'xiaohongshu.com',provider:'60s',
     api_urls:['https://first.test/v2/rednote','https://second.test/v2/rednote'],discover_topics:true,priority:3};
@@ -109,6 +117,8 @@ test('native Bilibili adapter preserves exact public stats and prefers short wor
   const selected=selectItems([{...items[0],title:'长视频',duration:1800,rank:1},
     {...items[0],title:'短视频',duration:180,rank:20}],rules,1);
   assert.equal(selected[0].title,'短视频');
+  const gaming=parseNativeSource('bilibili-popular',JSON.stringify({code:0,data:{list:[{...raw,tname:'电子竞技'}]}}));
+  assert.equal(normalizeItems([result(gaming,{name:'B站',expected_domain:'bilibili.com',kind:'video_chart'})],rules).length,0);
   assert.throws(()=>parseNativeSource('bilibili-popular',JSON.stringify({code:-412})),/未返回有效榜单/);
 });
 test('Kuaishou adapter only parses public JSON and filters pinned items',()=> {
