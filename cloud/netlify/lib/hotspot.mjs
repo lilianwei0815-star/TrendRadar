@@ -1,4 +1,5 @@
 import {settings,ruleText} from '../.generated/settings.mjs';
+import {collectDataxDouyin} from './datax-douyin.mjs';
 
 export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const missing = '暂未获取到可靠的中文原文摘要，请查看原文。';
@@ -125,6 +126,7 @@ export function parseDouyinVideos(body) {
 }
 
 async function fetchSource(source,config,fetcher,signal,{secrets=process.env,allowCredentialSources=true}={}) {
+  if (source.provider==='dataxapi-douyin') return collectDataxDouyin(source,fetcher,signal,{secrets,allowCredentialSources});
   if (source.provider==='juhe-douyin') {
     if (!allowCredentialSources) return {source,items:[],error:'需运行时凭证验证；构建不调用此接口'};
     const key=secrets.JUHE_DOUYIN_API_KEY?.trim();
@@ -201,9 +203,12 @@ export function normalizeItems(results,rules) {
       const metrics=typeof raw.extra?.info==='string' ? cleanText(raw.extra.info).slice(0,500) : '';
       const videoPath=new URL(url).pathname;
       const workLink=(source.expected_domain==='bilibili.com' && /^\/video\/(?:BV[0-9A-Za-z]+|av\d+)\/?$/.test(videoPath))
-        || (source.provider==='juhe-douyin' && source.expected_domain==='douyin.com' && /^\/video\/\d{15,22}\/?$/.test(videoPath));
+        || (['juhe-douyin','dataxapi-douyin'].includes(source.provider) && source.expected_domain==='douyin.com' && /^\/video\/\d{15,22}\/?$/.test(videoPath));
+      const verifiedDouyin=source.provider==='dataxapi-douyin' && raw.detail_verified===true
+        && Number.isSafeInteger(raw.detail_likes) && raw.detail_likes>=0;
       const video=source.kind==='video_chart' && workLink
-        && /\d[\d.,wW万亿+]*\s*观看/.test(metrics) && /\d[\d.,wW万亿+]*\s*点赞/.test(metrics);
+        && (source.provider==='dataxapi-douyin'?verifiedDouyin:
+          /\d[\d.,wW万亿+]*\s*观看/.test(metrics) && /\d[\d.,wW万亿+]*\s*点赞/.test(metrics));
       if (source.kind==='video_chart' && !video) continue;
       const matched=classify(title,rules);
       const category=video ? videoCategory(title,description) : matched || (source.discover_topics ? '短视频平台热榜线索' : null);
@@ -218,12 +223,14 @@ export function normalizeItems(results,rules) {
         old.rank=Math.min(old.rank,i+1); continue;
       }
       const item={title,url,category,sources:[source.name],rank:i+1,domain:source.expected_domain,description,
-        priority:source.priority ?? 100,source_id:source.id,kind:video?'video':'topic',metrics:video?metrics:'',
+        priority:source.priority ?? 100,source_id:source.id,source_provider:source.provider,kind:video?'video':'topic',metrics:video?metrics:'',
+        metrics_checked_at:verifiedDouyin?raw.metrics_checked_at:null,
         required_video_discovery:video && source.required_video_discovery===true,
         published_at:video && Number.isFinite(raw.pubDate) && raw.pubDate>0 && raw.pubDate<8640000000000000 ? new Date(raw.pubDate).toISOString() : null,
         duration:video && Number.isFinite(raw.duration) && raw.duration>0 ? raw.duration : null,
         heat:typeof raw.heat==='string' || typeof raw.heat==='number' ? String(raw.heat) : '',
-        video_evidence:video?`平台热门/排行榜上榜；${Number.isFinite(raw.duration) && raw.duration>0?'时长来自接口，':'时长、'}增速与账号历史未核实`:null};
+        video_evidence:video?(verifiedDouyin?raw.video_evidence:
+          `平台热门/排行榜上榜；${Number.isFinite(raw.duration) && raw.duration>0?'时长来自接口，':'时长、'}增速与账号历史未核实`):null};
       seen.set(key,item); items.push(item);
     }
   }
@@ -287,6 +294,12 @@ export function metadataDescriptions(html) {
 }
 
 async function summarize(item,fetcher,signal) {
+  if (item.source_provider==='dataxapi-douyin') {
+    const caption=cleanText(item.description.replace(/#[^\s#]+/gu,' '));
+    const description=/[\u4e00-\u9fff]/u.test(caption)?caption:'';
+    return {...item,summary:description?description.slice(0,180)+(description.length>180?'…':''):missing,
+      summary_origin:description?'视频文案摘录':'摘要暂缺'};
+  }
   let description=item.description, origin='热榜来源摘要';
   if (!usefulDescription(description,item.title)) {
     description=''; origin='原文摘要摘录';
@@ -344,6 +357,8 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
           textRow(`视频时长：${item.duration ? Math.floor(item.duration/60)+'分'+Math.floor(item.duration%60)+'秒' : '来源未提供'}`),
           textRow(`发布时间：${item.published_at ? new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.published_at)) : '来源未提供'}`),
           textRow(`依据：${item.video_evidence}；AI类型按标题及简介归类。`));
+        if (item.metrics_checked_at) content.push(textRow(`互动数据查询时间：${new Intl.DateTimeFormat('sv-SE',
+          {timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(item.metrics_checked_at))}`));
         else if (item.heat) content.push(textRow(`话题热度：${item.heat}（不是单条视频播放量）`));
         content.push(textRow(`来源：${item.sources.join('、')}｜${item.summary_origin}`));
       }
@@ -392,7 +407,14 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
   let items=[],failed=[],total=0,sourceResults=[];
   if (mode!=='test') {
     const rules=loadRules();
+    // Disabled credential integrations are absent from normal digests until explicitly enabled.
+    config={...config,sources:config.sources.filter(source=>source.provider!=='dataxapi-douyin'
+      || process.env.DATAXAPI_DOUYIN_ENABLED==='true')};
     sourceResults=await collectSources(config,fetcher,signal);
+    if (sourceResults.some(x=>x.source.provider==='dataxapi-douyin' && !x.error)) {
+      config={...config,coverage:{...config.coverage,pending:(config.coverage?.pending || [])
+        .filter(x=>x.name!=='抖音具体热门视频')}};
+    }
     failed=sourceResults.filter(x=>x.error).map(x=>x.source.name);
     for (const result of sourceResults) console.log(`${result.source.name}：${result.error || `获取 ${result.items.length} 条`}`);
     if (failed.length===config.sources.length) throw safeError('所有平台均抓取失败，停止发送，避免误报暂无新闻');
@@ -404,7 +426,8 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
   }
   const sourceDiagnostics=sourceResults.map(result=>({id:result.source.id,name:result.source.name,
     fetched:result.items.length,error:result.error,matched:normalizeItems([result],loadRules()).length,
-    selected:items.filter(item=>item.sources.includes(result.source.name)).length}));
+    selected:items.filter(item=>item.sources.includes(result.source.name)).length,
+    ...(result.diagnostics?{diagnostics:result.diagnostics}:{})}));
   if (mode!=='test' && !items.length) {
     console.log('本次没有匹配内容，不发送凑数消息');
     return {mode,matched:total,selected:0,summaries:0,successful_sources:config.sources.length-failed.length,

@@ -8,6 +8,24 @@
   "max_items": 60,
   "sources": [
     {
+      "id": "douyin-datax-video",
+      "name": "抖音爆款视频线索",
+      "expected_domain": "douyin.com",
+      "provider": "dataxapi-douyin",
+      "kind": "video_chart",
+      "priority": 0,
+      "required_video_discovery": true,
+      "discovery": {
+        "max_age_days": 7,
+        "min_likes": 100000,
+        "ai_min_likes": 10000,
+        "low_fan_max_followers": 10000,
+        "low_fan_min_likes": 5000,
+        "low_fan_like_ratio": 2,
+        "max_detail_requests": 6
+      }
+    },
+    {
       "id": "bilibili-hot-video",
       "name": "哔哩哔哩热门视频",
       "expected_domain": "bilibili.com",
@@ -183,12 +201,12 @@
   },
   "video_discovery": {
     "platform": "douyin",
-    "status": "douyin_video_source_unavailable_provider_service_stopped",
-    "discovery_scope": "douyin_topics_only_actual_video_source_not_connected",
+    "status": "dataxapi_tested_integration_pending_runtime_activation",
+    "discovery_scope": "low_fan_chart_and_ai_keyword_search_detail_verified_when_enabled",
     "fixed_item_quota": false,
     "watchlist_enabled": false,
     "watchlist": [],
-    "evidence_policy": "具体作品链接、作者、播放/点赞/评论数；热搜词不作为爆款视频；榜单不代表全站全部作品或实时增速。",
+    "evidence_policy": "具体视频链接、作者、近7日发布时间及详情点赞；榜单播放量与粉丝不作为实时已核实数据；关键词搜索和榜单均不代表全站覆盖。",
     "blocked_sources": [
       {
         "provider": "juhe-douyin",
@@ -210,7 +228,7 @@
     "pending": [
       {
         "name": "抖音具体热门视频",
-        "reason": "聚合数据 ID573 的人工客服确认数据源停服；替代来源尚未验收"
+        "reason": "DataXAPI试用调用已通过；接入代码待运行时密钥和开关配置，定时推送尚未验收"
       }
     ],
     "note": "公开热榜是全网线索的一部分，不等于全平台检索；热搜主题和具体视频分别展示。",
