@@ -9,7 +9,9 @@ This is a discovery feed, not exhaustive Douyin monitoring.
 
 The integration is OFF until `DATAXAPI_DOUYIN_ENABLED=true` and
 `DATAXAPI_API_KEY` are set for the production Functions runtime in Netlify.
-Keep the key secret, out of Git, build variables, previews and chat. Do not
+Keep the key secret, out of Git, previews and chat. Netlify Free automatically
+scopes production secrets to Builds, Functions and Runtime; the build/probe
+code never reads or uses this credential. Do not
 reveal/copy an existing key through browser automation. The account owner can
 enter it directly in Netlify's secret environment-variable form.
 

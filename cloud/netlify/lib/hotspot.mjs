@@ -400,7 +400,7 @@ export async function sendFeishu(payloads,webhook,fetcher,signal) {
   return delivered;
 }
 
-export async function runDigest({mode='normal',webhook,fetcher=fetch,config=settings}={}) {
+export async function runDigest({mode='normal',webhook,fetcher=fetch,config=settings,secrets=process.env}={}) {
   if (!['normal','test','preview'].includes(mode)) throw safeError('推送模式无效');
   if (mode!=='preview' && !webhook) throw safeError('缺少环境变量 FEISHU_WEBHOOK_URL');
   const signal=AbortSignal.timeout(240000);
@@ -409,8 +409,8 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
     const rules=loadRules();
     // Disabled credential integrations are absent from normal digests until explicitly enabled.
     config={...config,sources:config.sources.filter(source=>source.provider!=='dataxapi-douyin'
-      || process.env.DATAXAPI_DOUYIN_ENABLED==='true')};
-    sourceResults=await collectSources(config,fetcher,signal);
+      || secrets.DATAXAPI_DOUYIN_ENABLED==='true')};
+    sourceResults=await collectSources(config,fetcher,signal,{secrets});
     if (sourceResults.some(x=>x.source.provider==='dataxapi-douyin' && !x.error)) {
       config={...config,coverage:{...config.coverage,pending:(config.coverage?.pending || [])
         .filter(x=>x.name!=='抖音具体热门视频')}};

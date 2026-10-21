@@ -109,7 +109,7 @@ test('DataX candidates repeated across searches are only detail-checked once',as
 });
 
 test('disabled DataX integration does not alter ordinary runtime digests',async()=>{
-  const report=await runDigest({mode:'preview',config:{...settings,sources:[source,
+  const report=await runDigest({mode:'preview',secrets:{},config:{...settings,sources:[source,
     {id:'baidu',name:'百度',expected_domain:'baidu.com'}]},fetcher:async url=>{
     assert.equal(String(url).includes('dataxapi'),false);
     return json({status:'success',items:[]});
