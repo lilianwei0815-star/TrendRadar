@@ -1,5 +1,6 @@
 import {settings,ruleText} from '../.generated/settings.mjs';
 import {collectDataxDouyin} from './datax-douyin.mjs';
+import {prepareComparison,saveDeliveredDigest} from './digest-history.mjs';
 
 export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const missing = '暂未获取到可靠的中文原文摘要，请查看原文。';
@@ -344,7 +345,7 @@ const cardFallbacks=new WeakMap();
 const cardThemes=['purple','indigo','blue','orange','green','violet','red','grey'];
 const cardMarkdown=(content,size='normal')=>({tag:'markdown',content,text_size:size});
 
-export function makePayloads(items,config,failed,total,mode,now=new Date()) {
+export function makePayloads(items,config,failed,total,mode,now=new Date(),comparison=null) {
   const date=value=>new Intl.DateTimeFormat('sv-SE',{timeZone:config.timezone,dateStyle:'short',timeStyle:'short'}).format(new Date(value));
   const stamp=date(now),sections=config.presentation?.sections || [],grouped=new Map();
   if (mode==='test') {
@@ -372,9 +373,11 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
   const ordered=[...new Set([...sections.map(x=>x.name),'其他创作线索',...grouped.keys()])];
   for (const label of ordered) {
     const entries=grouped.get(label); if (!entries?.length) continue;
+    entries.sort((a,b)=>Number(b.novelty==='new')-Number(a.novelty==='new'));
     const theme=cardThemes[Math.max(0,sections.findIndex(x=>x.name===label))] || 'grey';
     const blocks=entries.map(item=> {
-      const title=`${++number}. ${item.title}`;
+      const badge={new:'🆕 新增',continuing:'🔁 持续热点',baseline:'📌 首次记录',unavailable:'⚪ 未比较'}[item.novelty];
+      const title=`${++number}. ${badge?badge+'｜':''}${item.title}`;
       const linkLabel=item.kind==='video'?'观看视频':item.category==='短视频平台热榜线索'?'查看平台热榜话题':'查看原文';
       const href=item.url.replace(/[<> ()\\]/g,c=>encodeURIComponent(c));
       const elements=[cardMarkdown('**'+cardEscape(title)+'**','heading-3'),
@@ -401,8 +404,16 @@ export function makePayloads(items,config,failed,total,mode,now=new Date()) {
     if (failed.length) footer.push('本轮抓取失败：'+failed.join('、'));
     if (config.coverage?.pending?.length) footer.push('尚未接通：'+config.coverage.pending.map(x=>x.name).join('、'));
     const build=(batch,part)=> {
-      const heading=`${label}｜${entries.length}条`;
+      const newCount=entries.filter(x=>x.novelty==='new').length;
+      const heading=`${label}｜${entries.length}条`+(comparison?.status==='compared'?` · 新增${newCount}`:'');
       const elements=[cardMarkdown(`萌宠创作热点 · ${stamp} · 分类第${part}张`,'notation')];
+      if (comparison) {
+        const note=comparison.status==='compared'
+          ? `较上次成功推送（${date(comparison.previous_sent_at)}）：本轮新增 ${comparison.new_items} 条，持续热点 ${comparison.continuing_items} 条。`
+          : comparison.status==='baseline'?'首次建立推送记录；本轮未与历史比较，下一轮开始标记新增。'
+          :'上次推送记录暂不可用，本轮未比较，不将全部内容标成新增。';
+        elements.push(cardMarkdown(cardEscape(note),'notation'));
+      }
       batch.forEach((block,index)=>{if(index) elements.push({tag:'hr'}); elements.push(...block.elements);});
       elements.push({tag:'hr'},cardMarkdown(footer.map(cardEscape).join('\n'),'notation'));
       const payload={msg_type:'interactive',card:{schema:'2.0',config:{wide_screen_mode:true},
@@ -459,7 +470,7 @@ export async function sendFeishu(payloads,webhook,fetcher,signal) {
   return delivered;
 }
 
-export async function runDigest({mode='normal',webhook,fetcher=fetch,config=settings,secrets=process.env}={}) {
+export async function runDigest({mode='normal',webhook,fetcher=fetch,config=settings,secrets=process.env,historyStore=null}={}) {
   if (!['normal','test','preview'].includes(mode)) throw safeError('推送模式无效');
   if (mode!=='preview' && !webhook) throw safeError('缺少环境变量 FEISHU_WEBHOOK_URL');
   const signal=AbortSignal.timeout(240000);
@@ -493,10 +504,16 @@ export async function runDigest({mode='normal',webhook,fetcher=fetch,config=sett
     return {mode,matched:total,selected:0,summaries:0,successful_sources:config.sources.length-failed.length,
       failed_sources:failed,source_diagnostics:sourceDiagnostics,messages:0,delivered:0,...(mode==='preview'?{items:[]}: {})};
   }
-  const payloads=makePayloads(items,config,failed,total,mode);
+  const comparison=mode==='normal'?await prepareComparison(items,historyStore):null;
+  if (comparison) items=comparison.items;
+  const payloads=makePayloads(items,config,failed,total,mode,new Date(),comparison);
   const delivered=mode==='preview' ? 0 : await sendFeishu(payloads,webhook.trim(),fetcher,signal);
+  const historySaved=comparison && delivered===payloads.length
+    ? await saveDeliveredDigest(items,historyStore,comparison):false;
   return {mode,matched:total,selected:items.length,summaries:items.filter(x=>x.summary_origin!=='摘要暂缺').length,
     successful_sources:mode==='test'?0:config.sources.length-failed.length,failed_sources:failed,
     source_diagnostics:sourceDiagnostics,
-    messages:payloads.length,delivered,...(mode==='preview'?{items}: {})};
+    messages:payloads.length,delivered,...(comparison?{comparison_status:comparison.status,
+      compared_to:comparison.previous_sent_at,new_items:comparison.new_items,continuing_items:comparison.continuing_items,history_saved:historySaved}:{}),
+    ...(mode==='preview'?{items}: {})};
 }

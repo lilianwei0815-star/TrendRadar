@@ -8,7 +8,7 @@ await writeFile(new URL('.generated/settings.mjs', import.meta.url),
 // Public, non-sensitive metadata used to verify which revision is live.
 await writeFile(new URL('public/deployment.json', import.meta.url), JSON.stringify({
   revision: process.env.COMMIT_REF || 'local',
-  digest_format: 'category-cards-v3',
+  digest_format: 'category-cards-v4-new-vs-previous',
   video_discovery: config.video_discovery?.status || 'not_configured'
 })+'\n');
 console.log(`已载入 ${config.sources.length} 个热榜/作品来源；北京时间每天 08:00、18:00`);

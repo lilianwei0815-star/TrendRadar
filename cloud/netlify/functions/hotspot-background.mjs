@@ -1,4 +1,5 @@
 import {authenticate} from '../lib/auth.mjs';
+import {createHistoryStore} from '../lib/history-store.mjs';
 import {runDigest} from '../lib/hotspot.mjs';
 export default async function(request) {
   if (request.method !== 'POST') return;
@@ -7,7 +8,8 @@ export default async function(request) {
   const event = authenticate(body,request.headers.get('x-hotspot-signature'),process.env.HOTSPOT_INTERNAL_SECRET);
   if (!event) { console.warn('拒绝未验证或过期的内部调用'); return; }
   try {
-    const report = await runDigest({mode:event.mode,webhook:process.env.FEISHU_WEBHOOK_URL});
+    const report = await runDigest({mode:event.mode,webhook:process.env.FEISHU_WEBHOOK_URL,
+      historyStore:event.mode==='normal'?createHistoryStore():null});
     console.log(JSON.stringify(report));
   } catch (error) {
     // A batch may already have reached Feishu. Do not throw and automatically
